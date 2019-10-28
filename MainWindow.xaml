@@ -1,0 +1,34 @@
+﻿<Window 
+        xmlns:fsxaml="http://github.com/fsprojects/FsXaml"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:i="clr-namespace:System.Windows.Interactivity;assembly=System.Windows.Interactivity"
+        xmlns:local="clr-namespace:SnakeGame;assembly=snake_Fs"
+        mc:Ignorable="d"
+        Title="Snake" Height="500" Width="500" Focusable="True" >
+    
+    <Window.DataContext>
+        <local:GameViewModel />
+    </Window.DataContext>
+    
+    <Window.InputBindings>
+        <KeyBinding Key="Space" Command="{Binding Stop_Cmd}"/>
+        <KeyBinding Key="Up" Command="{Binding Up_Cmd}"/>
+        <KeyBinding Key="Down" Command="{Binding Down_Cmd}"/>
+        <KeyBinding Key="Left" Command="{Binding Left_Cmd}"/>
+        <KeyBinding Key="Right" Command="{Binding Right_Cmd}"/>
+    </Window.InputBindings>
+
+
+    <i:Interaction.Triggers>
+        <i:EventTrigger  EventName="Loaded">
+            <i:InvokeCommandAction Command="{Binding OnLoaded}" CommandParameter="{Binding ElementName=Griddy}"/>
+        </i:EventTrigger>
+    </i:Interaction.Triggers>
+
+
+    <UniformGrid Name="Griddy" Columns="{Binding Colums}" Rows="{Binding Rows}" Focusable="False">
+    </UniformGrid>
+</Window>
