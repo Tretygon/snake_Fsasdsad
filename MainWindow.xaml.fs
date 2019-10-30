@@ -65,17 +65,8 @@ module Settings=
     let FruitBrush = Brushes.Black
     let NeuronLayerDim = [|24;8;8;4|]
     let rng= new System.Random()
-<<<<<<< HEAD
-<<<<<<< HEAD
-    let PopulationSize = 300
-=======
-    let PopulationSize = 100
->>>>>>> parent of 3ffa6fe... swsad
-    let MutationRate = 0.2
-=======
     let PopulationSize = 100
     let MutationRate = 0.05
->>>>>>> parent of ff0ddf1... asas
     ///how often are weigths mutated
     let WeightMutationChance = 0.3
     let crossOverChance = 1.0
@@ -363,14 +354,7 @@ type AI(brainSource : NN_source) =
                             |> sign 
                             |> float 
                             |> (*) Settings.MutationRate 
-<<<<<<< HEAD
-<<<<<<< HEAD
                             |> (*) (rng.NextDouble() - 1.0 |> sign |> float)
-=======
->>>>>>> parent of ff0ddf1... asas
-=======
-                            |> (*) rng.NextDouble-1.0
->>>>>>> parent of 3ffa6fe... swsad
                             |> (+) weight
                         )))
          |> Net
