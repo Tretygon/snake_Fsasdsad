@@ -66,9 +66,9 @@ module Settings=
     let NeuronLayerDim = [|24;8;8;4|]
     let rng= new System.Random()
     let PopulationSize = 100
-    let MutationRate = 0.05
+    let MutationRate = 0.2
     ///how often are weigths mutated
-    let WeightMutationChance = 0.3
+    let WeightMutationChance = 0.01
     let crossOverChance = 1.0
     let TurnsUntilStarvingToDeath = 100
     let turnsToFitness x = 0 * x
@@ -354,6 +354,7 @@ type AI(brainSource : NN_source) =
                             |> sign 
                             |> float 
                             |> (*) Settings.MutationRate 
+                            |> (*) rng.NextDouble-1.0
                             |> (+) weight
                         )))
          |> Net
