@@ -56,16 +56,21 @@ module Aux =
 type MainWindow = XAML<"MainWindow.xaml"> 
 
 
+
 module Settings= 
-    let rows = 20
-    let columns = 20
+    let rows = 9
+    let columns = 9
     let BaseBrush = Brushes.Magenta//Brushes.WhiteSmoke
     let SnakeBrush = Brushes.Green
     let FruitBrush = Brushes.Black
-    let NeuronLayerDim = [|24;4;4;4|]
+    let NeuronLayerDim = [|24;8;8;4|]
     let rng= new System.Random()
 <<<<<<< HEAD
+<<<<<<< HEAD
     let PopulationSize = 300
+=======
+    let PopulationSize = 100
+>>>>>>> parent of 3ffa6fe... swsad
     let MutationRate = 0.2
 =======
     let PopulationSize = 100
@@ -75,7 +80,7 @@ module Settings=
     let WeightMutationChance = 0.3
     let crossOverChance = 1.0
     let TurnsUntilStarvingToDeath = 100
-    let turnsToFitness x = -1 * x
+    let turnsToFitness x = 0 * x
     let scoreToFitness x = 500 * x
     let ActivationFunction value = 1.0/(1.0 + exp(-value))   // sigmoid
     let log (str:string) =
@@ -359,9 +364,13 @@ type AI(brainSource : NN_source) =
                             |> float 
                             |> (*) Settings.MutationRate 
 <<<<<<< HEAD
+<<<<<<< HEAD
                             |> (*) (rng.NextDouble() - 1.0 |> sign |> float)
 =======
 >>>>>>> parent of ff0ddf1... asas
+=======
+                            |> (*) rng.NextDouble-1.0
+>>>>>>> parent of 3ffa6fe... swsad
                             |> (+) weight
                         )))
          |> Net
@@ -423,24 +432,21 @@ type Population(directory : string, newPop : bool) =
         seq{1..n} |> Seq.map (fun ord ->
             let res = this.allPlayOneGame ()
             let rng = Settings.rng
-            let getRand ()= rng.Next Settings.PopulationSize |>  rng.Next // |>  rng.Next         //TODO this selection may be too aggresive
+            let gerRand3 ()= rng.Next Settings.PopulationSize |>  rng.Next  |>  rng.Next
             let total_fitnness = res |> Seq.sumBy fst
-            let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
-            Parallel.For(0,Settings.PopulationSize,new ParallelOptions(MaxDegreeOfParallelism=15),(fun index -> 
-                //Array.Parallel.init Settings.PopulationSize     -- uses just half the cpu
-                let item = 
-                    res.[getRand()] 
-                    |> snd 
-                    |> fun ai ->
-                        if  rng.NextDouble ()> Settings.crossOverChance 
-                        then ai.mutate ()
-                        else 
-                            getRand ()
-                            |> Array.get res 
-                            |> snd
-                            |> AI.Merge ai
-                            |> fun a -> a.mutate () 
-                do survivors.[index] <- item   )) |> ignore
+            let survivors = Array.init Settings.PopulationSize  (fun _ -> 
+                let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
+                res.[i] 
+                |> snd 
+                |> fun ai ->
+                    if  rng.NextDouble ()> Settings.crossOverChance 
+                    then ai.mutate ()
+                    else 
+                        gerRand3 ()
+                        |> Array.get res 
+                        |> snd
+                        |> AI.Merge ai
+                        |> fun a -> a.mutate () )
             
             let (fit,best) = Array.head res
             do Settings.log <| sprintf "run %d, max fit: %d,  median %d,   avg %d" ord fit (fst res.[Settings.PopulationSize/2]) (res|> Seq.sumBy fst |> fun x -> x/ Settings.PopulationSize)
@@ -485,12 +491,13 @@ type GameViewModel() as self=
 
     let pop = new Population ("testPop", true) 
     let (bestScore, bestSnake) =  pop.PlayGames 200 |>Seq.map Seq.head |> Seq.maxBy fst
-    let mutable ai = bestSnake // new AI(Nothing) //
+    let mutable ai = new AI(Nothing) //bestSnake
 
 
     let resolveTurn = function
         | TurnOK _-> ()
         | GameOver result-> 
+            ai<- new AI(Nothing)
             game.Restart()
             Settings.log "new game"
 
