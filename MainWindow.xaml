@@ -9,6 +9,21 @@
         mc:Ignorable="d"
         Title="Snake" Height="500" Width="500" Focusable="True" >
     
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     <Window.DataContext>
         <local:GameViewModel />
     </Window.DataContext>

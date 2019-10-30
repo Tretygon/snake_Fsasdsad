@@ -59,23 +59,23 @@ type MainWindow = XAML<"MainWindow.xaml">
 
 module Settings= 
     let rows = 9
-    let columns = 9
+    let columns = rows
     let BaseBrush = Brushes.Magenta//Brushes.WhiteSmoke
     let SnakeBrush = Brushes.Green
     let FruitBrush = Brushes.Black
-    let NeuronLayerDim = [|24;8;8;4|]
+    let NeuronLayerDim = [|24;6;4;4|]
     let rng= new System.Random()
     let PopulationSize = 100
     let MutationRate = 0.05
     ///how often are weigths mutated
-    let WeightMutationChance = 0.3
+    let WeightMutationChance = 0.2
     let crossOverChance = 1.0
     let TurnsUntilStarvingToDeath = 100
     let turnsToFitness x = 0 * x
     let scoreToFitness x = 500 * x
     let ActivationFunction value = 1.0/(1.0 + exp(-value))   // sigmoid
     let log (str:string) =
-        Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore //Microsoft.Extensions.Logging.Debug.
+        Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore 
     
 
 //[<StructuralComparison;StructuralEquality>]
@@ -225,7 +225,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
             //when dir != Directions.Right
 
             let (newX,newY) = addTuples snake.Head dirToCoords 
-            //do Settings.log <| sprintf "%A  ->    (%d,%d)  ...%A" snake.Head newX newY direction
+            //do Settings.log <| sprintf "%A  ->    (%d,%d)  ...%A" snake.Head newX newY directions
             let moveToEmpty ()= 
                 do changeCell CellState.Empty <|| snake.Last
                 do changeCell CellState.Snake newX newY
@@ -277,7 +277,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
 
                 do lookInDirection snake.Head 1
 
-                let toVal = Option.map (fun v->1.0/float v) >> Option.defaultValue 0.0
+                let toVal = Option.map (fun v->Settings.rows - v |> float ) >> Option.defaultValue 0.0
                 seq{ toVal distToWall; toVal distToSnake; toVal distToFruit})
         |> Seq.concat
 
@@ -319,6 +319,7 @@ type AI(brainSource : NN_source) =
     
 
     let Forward_prop inp = 
+        //do Settings.log <| sprintf "lookaround: %A  " inp
         Seq.fold (fun input -> 
             let biasedInp = Seq.append input (seq{1.0})
             Seq.map (fun neuron -> 
@@ -374,14 +375,15 @@ type AI(brainSource : NN_source) =
 
 
 type Population(directory : string, newPop : bool) = 
-    let mutable snakes: AI [] = 
+    let rng = new Random(Settings.rng.Next())
+    let mutable snakes: AI seq = 
         if newPop
         then 
             do IO.Directory.CreateDirectory directory |> ignore
-            Array.init Settings.PopulationSize (fun _ -> new AI(Nothing))
+            Seq.init Settings.PopulationSize (fun _ -> new AI(Nothing))
         else 
             if IO.Directory.Exists directory
-            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI )  |> Array.ofSeq
+            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI ) // |> Array.ofSeq
             else  new ArgumentException() |> raise
         
     
@@ -390,7 +392,24 @@ type Population(directory : string, newPop : bool) =
 
 
     
-    let CalcFitness res = Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
+    let CalcFitness res  =
+        let score=res.score
+        let turns = res.turns
+        turns + pown 2 score + pown score 2 * 500 - (Math.Pow(float score, 1.2) * Math.Pow((float score/4.0),1.3) |> int)
+        //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
+
+    let roulette (pop:(int*AI) seq) = 
+        let sum = Seq.sumBy fst pop
+            
+        let runningSums = 
+            pop 
+            |> Seq.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,failwith "") 
+            |> Seq.tail
+        do Settings.log <| sprintf "%A" (Seq.head runningSums)
+        do runningSums.First ()|> snd |>ignore
+        Seq.init Settings.PopulationSize (fun _ -> rng.Next sum) 
+        |> Seq.map (fun targetSum ->  Seq.find (fst >> (>) targetSum) runningSums |> snd )
+    
 
     member _.play (gm:GameManager) (ai:AI) = 
         //do Settings.log "new game"
@@ -407,37 +426,51 @@ type Population(directory : string, newPop : bool) =
     member this.allPlayOneGame ()= 
         let res = 
             (games,snakes) 
-            ||> Array.zip  // Seq would be better, but parallel-zip is defined only for arrays
-            |> Array.Parallel.map (fun x -> x ||> this.playUntilLose)  //parallel
-        do Array.sortInPlaceBy fst res
-        Array.rev res
+            ||> Seq.zip  // Seq would be better, but parallel-zip is defined only for arrays
+            |> Seq.map (fun x -> x ||> this.playUntilLose)  //parallel
+        Seq.sortByDescending fst res
         
     member this.PlayGames n = 
         seq{1..n} |> Seq.map (fun ord ->
-            let res = this.allPlayOneGame ()
+            let res = this.allPlayOneGame () |> Array.ofSeq
             let rng = Settings.rng
-            let gerRand3 ()= rng.Next Settings.PopulationSize |>  rng.Next  |>  rng.Next
-            let total_fitnness = res |> Seq.sumBy fst
-            let survivors = Array.init Settings.PopulationSize  (fun _ -> 
-                let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
-                res.[i] 
+            let getRand ()= rng.Next Settings.PopulationSize |>  rng.Next  
+
+            (* let survivors = Array.init Settings.PopulationSize  (fun _ -> 
+            snakes <- res 
+                        |> roulette
+                        |> Seq.map (fun ai -> ai.mutate())
+            *)
+           
+
+            
+            
+            let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
+            Parallel.For(0,Settings.PopulationSize,(fun index -> 
+            //Array.Parallel.init Settings.PopulationSize     // uses just half the cpu
+            let item = 
+                res.[getRand()] 
                 |> snd 
                 |> fun ai ->
                     if  rng.NextDouble ()> Settings.crossOverChance 
                     then ai.mutate ()
                     else 
-                        gerRand3 ()
+                        getRand ()
                         |> Array.get res 
                         |> snd
                         |> AI.Merge ai
-                        |> fun a -> a.mutate () )
+                        |> fun a -> a.mutate () 
+            do survivors.[index] <- item   )) |> ignore
+
+            let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
             
-            let (fit,best) = Array.head res
-            do Settings.log <| sprintf "run %d, max fit: %d,  median %d,   avg %d" ord fit (fst res.[Settings.PopulationSize/2]) (res|> Seq.sumBy fst |> fun x -> x/ Settings.PopulationSize)
-            do snakes <- survivors
+            let (fit,best) = Seq.head res
+            do Settings.log <| sprintf "run %d, max fit: %d,  avg %d" ord fit  (res|> Seq.sumBy fst |> fun x -> x/ Settings.PopulationSize)
             res
             )
-
+            
+        
+    
     
 
 type GameViewModel() as self=
@@ -474,14 +507,14 @@ type GameViewModel() as self=
     
 
     let pop = new Population ("testPop", true) 
-    let (bestScore, bestSnake) =  pop.PlayGames 200 |>Seq.map Seq.head |> Seq.maxBy fst
-    let mutable ai = new AI(Nothing) //bestSnake
+    let (bestScore, bestSnake) =  pop.PlayGames 500 |>Seq.last |>  Seq.head 
+    let mutable ai = bestSnake
 
 
     let resolveTurn = function
         | TurnOK _-> ()
         | GameOver result-> 
-            ai<- new AI(Nothing)
+            //ai<- new AI(Nothing)
             game.Restart()
             Settings.log "new game"
 
