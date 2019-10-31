@@ -351,7 +351,7 @@ type AI (game : GameManager,brainSource : NN_source) =
                 |> Settings.ActivationFunction  )) inp brain
     
     member _.Brain = brain
-
+    member _.Game = game
     member _.Rng = rng
 
     member _.saveBrain (filePath:string) =
@@ -359,7 +359,7 @@ type AI (game : GameManager,brainSource : NN_source) =
         let ser = new Newtonsoft.Json.JsonSerializer()
         do ser.Serialize(stream, brain)
     
-    member _.TakeTurn (game:GameManager) =
+    member _.TakeTurn () =
             game.LookAround ()     
             |> Forward_prop
             |> Seq.indexed
@@ -446,8 +446,7 @@ type Population(source : PopulationSource) =
             else rng.Next sum |> chooseOne |> snd |> AI.Mutate (GetGame ())
             ) 
 
-    let PrepareTrainingBatches (arr: AI [])= 
-        //let games = GamePool_Batches.Value
+    let PrepareBatches (arr: AI [])= 
         arr |> Array.map (fun ai -> 
             seq{
                 yield ai              //try removing it
@@ -459,12 +458,12 @@ type Population(source : PopulationSource) =
             }   
         )
 
-    let play (gm:GameManager) (ai:AI) = 
-        do gm.Restart ()
-        Seq.initInfinite (fun _ -> ai.TakeTurn gm)
+    let play (ai:AI) = 
+        do ai.Game.Restart ()
+        Seq.initInfinite (fun _ -> ai.TakeTurn ())
 
-    let playUntilLose (gm:GameManager) (ai:AI) = 
-        play gm ai 
+    let playUntilLose (ai:AI) = 
+        play ai 
         |> Seq.find TurnResult.isGameOver //(Aux.isUnionCase <@GameOver@>)
         |> TurnResult.unwrapGameOver
         |> CalcFitness
@@ -472,11 +471,14 @@ type Population(source : PopulationSource) =
     
     let curry f = fun (a,b) -> f a b 
 
-    let rec TrainBatch (batch: seq<AI>) (n:int)= 
-            let thisSession = Seq.map (curry playUntilLose) batch
-            if n = 1 
-            then thisSession
-            else TrainBatch thisSession (n-1)
+    let BatchPlay (games:int) (batch: seq<AI>) =      // try doing one which also mutates
+        Seq.zip (
+            batch 
+            |> Seq.map (fun ai ->
+                   Seq.init games (fun _-> playUntilLose ai) 
+                   |> Seq.sumBy fst
+                   |> fun sum -> sum/games)
+        ) batch
             
     member this.allPlayOneGame snakes= 
         let res = 
@@ -489,36 +491,24 @@ type Population(source : PopulationSource) =
     
     
     member this.BatchTraining n = 
-           seq{1..n} |> Seq.map (fun ord ->
-               let res = this.allPlayOneGame snakes //|> Array.ofSeq
+        
+           Seq.init n (fun ord ->
+               let batches = PrepareBatches snakes
+               let tmp =
+                    batches 
+                    |> Array.Parallel.map (BatchPlay 3)
+                    |> Array.map (Seq.maxBy fst)
+               do Array.sortInPlaceBy fst tmp 
+               let res = tmp|> Array.rev//|> Misc.reverseInPlace
 
-               let getRand (rg:Random)= rg.Next Settings.PopulationSize |>  rg.Next  
+               let getRand (rg:Random)= rng.Next Settings.PopulationSize |>  rg.Next  
 
-               snakes <- res |> roulette
-                           //Misc.mapInPlace (fun ai -> ai.mutate())
-               
-               
-               (*let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
-               Parallel.For(0,Settings.PopulationSize,(fun index -> 
-               //Array.Parallel.init Settings.PopulationSize     // uses just half the cpu
-               let item = 
-                   res.[(snd item).getRng |> getRand] 
-                   |> snd 
-                   |> fun ai ->
-                       if  rng.NextDouble ()> Settings.crossOverChance 
-                       then ai.mutate ()
-                       else 
-                           getRand ()
-                           |> Array.get res 
-                           |> snd
-                           |> AI.Merge ai
-                           |> fun a -> a.mutate () 
-               do survivors.[index] <- item   )) |> ignore
-               ( *)
+               snakes<- res |> roulette
+                          
                let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
                
-               let (fitB,best) = Seq.head res
-               let (fitW,best) = Seq.last res
+               let (fitB,best) = Array.head res
+               let (fitW,best) = Array.last res
                do Settings.log <| sprintf "gen %d, max fit: %d, last: %d ,  avg %d" ord fitB fitW  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
                
                res
@@ -552,8 +542,8 @@ type Population(source : PopulationSource) =
             ( *)
             let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
             
-            let (fitB,best) = Seq.head res
-            let (fitW,best) = Seq.last res
+            let (fitB,best) = Array.head res
+            let (fitW,best) = Array.last res
             do Settings.log <| sprintf "gen %d, max fit: %d, last: %d ,  avg %d" ord fitB fitW  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
             
             res
