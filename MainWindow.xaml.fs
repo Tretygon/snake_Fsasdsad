@@ -47,14 +47,14 @@ module Settings=
     let BaseBrush = Brushes.Magenta//Brushes.WhiteSmoke
     let SnakeBrush = Brushes.Green
     let FruitBrush = Brushes.Black
-    let NeuronLayerDim = [|24;5;4;3|]
+    let NeuronLayerDim = [|24;6;4;3|]
     let rng= new System.Random()
-    let PopulationSize = 100
+    let PopulationSize = 50
     let MutationRate = 0.05
     ///how often are weigths mutated
     let WeightMutationChance = 0.2
     let crossOverChance = 1.0
-    let TurnsUntilStarvingToDeath = 100
+    let TurnsUntilStarvingToDeath = 40
     let turnsToFitness x = 0 * x
     let scoreToFitness x = 500 * x
     let ActivationFunction value = 1.0/(1.0 + exp(-value))   // sigmoid
@@ -73,7 +73,17 @@ module Misc =
         
     let flip f = (fun x y -> f y x)
         
-
+    let mapInPlace f (arr: 'a []) = 
+        for i in [0..arr.Length-1] do
+            arr.[i] <- arr.[i] |> f 
+        arr
+    let reverseInPlace (arr: 'a []) = 
+        let lastIndex = arr.Length - 1
+        for i in [0..lastIndex/2] do
+            let tmp = arr.[i]
+            arr.[i] <- arr.[lastIndex-1]
+            arr.[lastIndex-1] <- tmp
+        arr
         
     type Random with
     member this.getSign ()= 
@@ -219,15 +229,24 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
     //member this.Restart () = this.Restart <| rng.Next()
 
     member _.Move relDirection = 
-        let absDirection = (int relDirection + int snake.direction) % 4 |> enum<Directions>
+
+        
         if snake.turnWithoutSnack = Settings.TurnsUntilStarvingToDeath 
         then CurrentScore GameOver
         else
+            let absDirection =
+                let diff = 
+                    match relDirection with
+                    | Directions.Right -> 1 
+                    | Directions.Left -> -1
+                    |_ -> 0
+                (diff + 4 + int snake.direction )% 4 |> enum<Directions>
+
             let dirToCoords = 
                 match absDirection with
                     | Directions.Left -> (-1,0)
-                    | Directions.Right -> (1,0)
                     | Directions.Up -> (0,-1)
+                    | Directions.Right -> (1,0)
                     | Directions.Down -> (0,1)
             //when dir != Directions.Right
 
@@ -254,7 +273,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                      do changeCell CellState.Fruit <|| fruit
                      snake <- {snake with 
                                 direction = absDirection; 
-                                turnWithoutSnack = snake.turnWithoutSnack + 1;
+                                turnWithoutSnack = 0;
                                 turns = snake.turns + 1;
                                 score = snake.score + 1}
                      CurrentScore TurnOK
@@ -263,6 +282,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                  | CellState.Snake -> CurrentScore GameOver
     member _.LookAround ()=
         let rotate n s = Seq.append (Seq.skip n s) (Seq.take n s |> Seq.rev)
+        let tail = snake.Last
         let dirs = seq{(- 1,0);(- 1,-1);(0,-1);(1,-1);(1,0);(1,1);(0,1);(-1,1)} // direction vectors ordered clockwise from Direction.Left
 
         dirs
@@ -280,9 +300,9 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                     then if distToWall.IsNone then distToWall <- Some dist
                     else
                         match Array2D.get stateField <|| newCell with 
-                            | CellState.Empty-> ()
+                            | CellState.Snake when tail <> newCell-> if distToSnake.IsNone then distToSnake <- Some dist 
                             | CellState.Fruit-> if distToFruit.IsNone then distToFruit <- Some dist
-                            | CellState.Snake-> if distToSnake.IsNone then distToSnake <- Some dist 
+                            | _ -> ()
                         do lookInDirection newCell (dist+1)
                    
 
@@ -341,7 +361,7 @@ type AI(brainSource : NN_source) =
 
     member _.getRng ()= rng
 
-    member _.saveBrain (filePath:string) b =
+    member _.saveBrain (filePath:string) =
         let stream = new System.IO.StreamWriter(filePath)
         let ser = new Newtonsoft.Json.JsonSerializer()
         do ser.Serialize(stream, brain)
@@ -354,25 +374,25 @@ type AI(brainSource : NN_source) =
             |> Seq.maxBy snd
             |> (fst >> enum<Directions>)
             |> game.Move  
-        
+
 
     member _.mutate ()= 
-         brain 
-         |> Array.map (
-                Array.map (
-                    Array.map (fun weight-> 
-                        if rng.NextDouble () > Settings.WeightMutationChance
-                        then weight
-                        else  
-                            rng.Next () - rng.Next () 
-                            |> sign 
-                            |> float 
-                            |> (*) Settings.MutationRate 
-                            |> (*) (rng.NextDouble() - 1.0 |> sign |> float)
-                            |> (+) weight
-                        )))
-         |> Net
-         |> AI
+        let map = Array.map
+        //let map = Misc.mapInPlace
+        let changeWeight weight = 
+            if rng.NextDouble () > Settings.WeightMutationChance
+            then weight
+            else  
+                rng.Next () - rng.Next () 
+                |> sign 
+                |> float 
+                |> (*) Settings.MutationRate 
+                |> (*) (rng.NextDouble() - 1.0 |> sign |> float)
+                |> (+) weight
+        brain 
+        |> map ( map ( map ( changeWeight)))
+        |> Net
+        |> AI
     static member Merge (ai_1:AI) (ai_2:AI) = 
         (ai_1.getBrain (),ai_2.getBrain ())
         ||> Array.map2 (
@@ -389,14 +409,14 @@ type AI(brainSource : NN_source) =
 
 type Population(directory : string, newPop : bool) = 
     let rng = new Random(Settings.rng.Next())
-    let mutable snakes: AI seq = 
+    let mutable snakes: AI [] = 
         if newPop
         then 
             do IO.Directory.CreateDirectory directory |> ignore
-            Seq.init Settings.PopulationSize (fun _ -> new AI(Nothing))
+            Array.init Settings.PopulationSize (fun _ -> new AI(Nothing))
         else 
             if IO.Directory.Exists directory
-            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI ) // |> Array.ofSeq
+            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI ) |> Array.ofSeq
             else  new ArgumentException() |> raise
         
     
@@ -408,25 +428,27 @@ type Population(directory : string, newPop : bool) =
     let CalcFitness res  =
         let score=res.score
         let turns = res.turns
-        turns + pown 2 score + pown score 2 * 500 - (Math.Pow(float score, 1.2) * Math.Pow((float score/4.0),1.3) |> int)
+        //turns + 
+        pown 2 score + pown score 2 * 500 - (Math.Pow(float score, 1.2) * Math.Pow((float score/4.0),1.3) |> int)
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
 
-    let roulette (pop:(int*AI) seq) = 
+    let roulette (pop:(int*AI) []) = 
             
         let runningSums = 
             pop 
-            |> Seq.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,new AI(Nothing)) 
-            |> Seq.tail
-            |> Seq.cache
-            //
+            |> Array.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,new AI(Nothing)) // new specimen when rng hits 0
             
-        //do Settings.log <| sprintf "%A" (Seq.head runningSums)
+        //do Settings.log <| sprintf "%A" runningSums
 
-        let sum = Seq.last runningSums |> fst
-        let chooseOne targetSum =  Seq.find (fst >> (>) targetSum) runningSums |> snd 
+        let sum = Seq.last runningSums |> fst 
+        let chooseOne targetSum =  Seq.find (fun x -> fst x >= targetSum) runningSums 
 
-        Seq.init Settings.PopulationSize (fun _ -> rng.Next sum) 
-        |> Seq.map chooseOne
+        Array.init Settings.PopulationSize (fun i -> 
+            if i < Settings.PopulationSize/10
+            then pop.[i] |> snd
+            else rng.Next sum |> chooseOne |> snd |> fun a -> a.mutate()
+            
+            ) 
     
 
     member _.play (gm:GameManager) (ai:AI) = 
@@ -444,11 +466,11 @@ type Population(directory : string, newPop : bool) =
     member this.allPlayOneGame ()= 
         let res = 
             (games,snakes) 
-            ||> Seq.zip  // Seq would be better, but parallel-zip is defined only for arrays
-            |> Array.ofSeq
+            ||> Array.zip  // Seq would be better, but parallel-zip is defined only for arrays
+            //|> Array.ofSeq
             |> Array.Parallel.map (fun x -> x ||> this.playUntilLose)  //parallel
-        do Array.sortInPlaceBy fst res
-        res
+        do Array.sortInPlaceBy fst res 
+        res |> Array.rev//|> Misc.reverseInPlace
         
     member this.PlayGames n = 
         seq{1..n} |> Seq.map (fun ord ->
@@ -456,9 +478,8 @@ type Population(directory : string, newPop : bool) =
 
             let getRand (rg:Random)= rg.Next Settings.PopulationSize |>  rg.Next  
 
-            snakes <- res 
-                        |> roulette
-                        |> Seq.map (fun ai -> ai.mutate())
+            snakes <- res |> roulette
+                        //Misc.mapInPlace (fun ai -> ai.mutate())
             
            
 
@@ -483,8 +504,10 @@ type Population(directory : string, newPop : bool) =
             ( *)
             let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
             
-            let (fit,best) = Seq.head res
-            do Settings.log <| sprintf "run %d, max fit: %d,  avg %d" ord fit  (res|> Seq.sumBy fst |> fun x -> x/ Settings.PopulationSize)
+            let (fitB,best) = Seq.head res
+            let (fitW,best) = Seq.last res
+            do Settings.log <| sprintf "gen %d, max fit: %d, last: %d ,  avg %d" ord fitB fitW  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
+            
             res
             )
             
@@ -526,7 +549,13 @@ type GameViewModel() as self=
     
 
     let pop = new Population ("testPop", true) 
-    let (bestScore, bestSnake) =  pop.PlayGames 20 |>Seq.last |>  Seq.head 
+    let lastgame = pop.PlayGames 3000 |>Seq.last 
+
+    let mutable i = 0
+    do lastgame |> Array.iter (fun (sc,ai) ->  
+        do ai.saveBrain <|sprintf "%d" i    
+        do i<-i+1)
+    let (bestScore, bestSnake) = lastgame|>  Seq.head 
     let mutable ai = bestSnake
 
 
@@ -535,14 +564,14 @@ type GameViewModel() as self=
         | GameOver result-> 
             //ai<- new AI(Nothing)
             game.Restart()
-            Settings.log "new game"
+            //Settings.log "new game"
 
     
 
     do timer.Elapsed.Add (fun _ -> 
         ai.TakeTurn game
         |> resolveTurn ) 
-    
+        //())
     do timer.Start()
     
 
