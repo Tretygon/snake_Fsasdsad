@@ -33,23 +33,7 @@ open Microsoft.FSharp.Reflection
 
 
 
-module Aux =
-    let isUnionCase= function
-    (*| NewTuple exprs -> 
-        let iucs = List.map isUnionCase exprs
-        fun value -> List.exists ((|>) value) iucs*)
-    | NewUnionCase (uci, _) -> 
-        let utr = FSharpValue.PreComputeUnionTagReader uci.DeclaringType
-        box >> utr >> (=) uci.Tag
-    | _ -> failwith "Expression is no union case."
-    
-    let flip f = (fun x y -> f y x)
-    
-    
-    
-    type Random with
-    member this.getSign ()= 
-        this.Next () > this.Next ()
+
     
     
 
@@ -63,7 +47,7 @@ module Settings=
     let BaseBrush = Brushes.Magenta//Brushes.WhiteSmoke
     let SnakeBrush = Brushes.Green
     let FruitBrush = Brushes.Black
-    let NeuronLayerDim = [|24;6;4;4|]
+    let NeuronLayerDim = [|24;5;4;3|]
     let rng= new System.Random()
     let PopulationSize = 100
     let MutationRate = 0.05
@@ -77,13 +61,31 @@ module Settings=
     let log (str:string) =
         Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore 
     
+module Misc =
+    let isUnionCase= function
+    (*| NewTuple exprs -> 
+        let iucs = List.map isUnionCase exprs
+        fun value -> List.exists ((|>) value) iucs*)
+    | NewUnionCase (uci, _) -> 
+        let utr = FSharpValue.PreComputeUnionTagReader uci.DeclaringType
+        box >> utr >> (=) uci.Tag
+    | _ -> failwith "Expression is no union case."
+        
+    let flip f = (fun x y -> f y x)
+        
+
+        
+    type Random with
+    member this.getSign ()= 
+        this.Next () > this.Next ()
 
 //[<StructuralComparison;StructuralEquality>]
 type Directions = 
     | Left = 0
-    | Right = 1
-    | Up = 2
+    | Up = 1
+    | Right = 2
     | Down = 3
+    
     
 
 [<StructuralComparison;StructuralEquality>]
@@ -102,12 +104,12 @@ type Snake =
     }
     member this.Last = this.body.Last.Value
     member this.Head = this.body.First.Value
-    static member create x y =
+    static member create x y dir =
         let b = new LinkedList<int*int>()
         do b.AddFirst((x,y)) |> ignore
         {
             body = b;
-            direction = Directions.Right;
+            direction = dir
             score = 0;
             turnWithoutSnack = 0;
             turns = 0
@@ -152,10 +154,10 @@ type NN_source =
 type GameManager(draw:(CellState -> int -> int -> unit)) =
 
     let mutable seed = Settings.rng.Next ()
-    let mutable rng = new Random()
+    let mutable rng = new Random(seed)
     
     let addTuples (a,b) (c,d) = (a+c,b+d)
-    
+    let randDir () = rng.Next 4 |> enum<Directions>
     
     let mutable stateField = Array2D.init Settings.columns  Settings.rows <| fun x y -> 
         do draw CellState.Empty x y
@@ -170,7 +172,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
     let startX = (Settings.columns-3) / 2
     let startY = (Settings.rows-3) / 2
 
-    let mutable snake = Snake.create startX startY
+    let mutable snake = Snake.create startX startY <| randDir()
 
     do changeCell CellState.Snake startX startY
 
@@ -198,26 +200,31 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
     
     let CurrentScore f= f {score=snake.score ;turns = snake.turns}
     
-    member _.Restart new_seed= // allows reusing of the already allocated stuff => more effective than creating new instance whenever game ends
+
+
+
+    member _.Restart ()= // allows reusing of the already allocated stuff => more effective than creating new instance whenever game ends
         snake.body |> Seq.iter (fun (x,y) -> changeCell CellState.Empty x y)
         changeCell CellState.Empty <|| fruit
         
-        snake <- Snake.create startX startY
+        snake <- Snake.create startX startY <| randDir ()
         changeCell CellState.Snake startX startY
 
         fruit <- GenerateFruit ()
         changeCell CellState.Fruit <|| fruit 
     
-        seed <- new_seed
-        rng <- new Random(new_seed)
+        //seed <- new_seed
+        //rng <- new Random(new_seed)
 
-    member this.Restart () = this.Restart <| rng.Next()
-    member _.Move direction = 
+    //member this.Restart () = this.Restart <| rng.Next()
+
+    member _.Move relDirection = 
+        let absDirection = (int relDirection + int snake.direction) % 4 |> enum<Directions>
         if snake.turnWithoutSnack = Settings.TurnsUntilStarvingToDeath 
         then CurrentScore GameOver
         else
             let dirToCoords = 
-                match direction with
+                match absDirection with
                     | Directions.Left -> (-1,0)
                     | Directions.Right -> (1,0)
                     | Directions.Up -> (0,-1)
@@ -233,7 +240,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                 do snake.body.AddFirst((newX,newY)) |>  ignore
                 snake <- {snake with 
                             turns = snake.turns + 1;
-                            direction = direction; 
+                            direction = absDirection; 
                             turnWithoutSnack = snake.turnWithoutSnack + 1}
                 CurrentScore TurnOK
 
@@ -246,7 +253,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                      do fruit <- GenerateFruit ()
                      do changeCell CellState.Fruit <|| fruit
                      snake <- {snake with 
-                                direction = direction; 
+                                direction = absDirection; 
                                 turnWithoutSnack = snake.turnWithoutSnack + 1;
                                 turns = snake.turns + 1;
                                 score = snake.score + 1}
@@ -255,7 +262,11 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                  | CellState.Snake when snake.Last = (newX,newY) -> moveToEmpty ()
                  | CellState.Snake -> CurrentScore GameOver
     member _.LookAround ()=
-        seq{(-1,0);(1,0);(0,-1);(0,1);(-1,-1);(-1,1);(1,-1);(1,1)} // direction vectors
+        let rotate n s = Seq.append (Seq.skip n s) (Seq.take n s |> Seq.rev)
+        let dirs = seq{(- 1,0);(- 1,-1);(0,-1);(1,-1);(1,0);(1,1);(0,1);(-1,1)} // direction vectors ordered clockwise from Direction.Left
+
+        dirs
+        |> rotate (int snake.direction * 2)      // display inforamation relative to where the snake is looking
         |> Seq.map 
             (fun dir ->
                 let mutable distToWall = None
@@ -328,6 +339,8 @@ type AI(brainSource : NN_source) =
     
     member _.getBrain () = brain
 
+    member _.getRng ()= rng
+
     member _.saveBrain (filePath:string) b =
         let stream = new System.IO.StreamWriter(filePath)
         let ser = new Newtonsoft.Json.JsonSerializer()
@@ -399,16 +412,21 @@ type Population(directory : string, newPop : bool) =
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
 
     let roulette (pop:(int*AI) seq) = 
-        let sum = Seq.sumBy fst pop
             
         let runningSums = 
             pop 
-            |> Seq.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,failwith "") 
+            |> Seq.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,new AI(Nothing)) 
             |> Seq.tail
-        do Settings.log <| sprintf "%A" (Seq.head runningSums)
-        do runningSums.First ()|> snd |>ignore
+            |> Seq.cache
+            //
+            
+        //do Settings.log <| sprintf "%A" (Seq.head runningSums)
+
+        let sum = Seq.last runningSums |> fst
+        let chooseOne targetSum =  Seq.find (fst >> (>) targetSum) runningSums |> snd 
+
         Seq.init Settings.PopulationSize (fun _ -> rng.Next sum) 
-        |> Seq.map (fun targetSum ->  Seq.find (fst >> (>) targetSum) runningSums |> snd )
+        |> Seq.map chooseOne
     
 
     member _.play (gm:GameManager) (ai:AI) = 
@@ -427,29 +445,30 @@ type Population(directory : string, newPop : bool) =
         let res = 
             (games,snakes) 
             ||> Seq.zip  // Seq would be better, but parallel-zip is defined only for arrays
-            |> Seq.map (fun x -> x ||> this.playUntilLose)  //parallel
-        Seq.sortByDescending fst res
+            |> Array.ofSeq
+            |> Array.Parallel.map (fun x -> x ||> this.playUntilLose)  //parallel
+        do Array.sortInPlaceBy fst res
+        res
         
     member this.PlayGames n = 
         seq{1..n} |> Seq.map (fun ord ->
-            let res = this.allPlayOneGame () |> Array.ofSeq
-            let rng = Settings.rng
-            let getRand ()= rng.Next Settings.PopulationSize |>  rng.Next  
+            let res = this.allPlayOneGame () //|> Array.ofSeq
 
-            (* let survivors = Array.init Settings.PopulationSize  (fun _ -> 
+            let getRand (rg:Random)= rg.Next Settings.PopulationSize |>  rg.Next  
+
             snakes <- res 
                         |> roulette
                         |> Seq.map (fun ai -> ai.mutate())
-            *)
+            
            
 
             
             
-            let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
+            (*let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
             Parallel.For(0,Settings.PopulationSize,(fun index -> 
             //Array.Parallel.init Settings.PopulationSize     // uses just half the cpu
             let item = 
-                res.[getRand()] 
+                res.[(snd item).getRng |> getRand] 
                 |> snd 
                 |> fun ai ->
                     if  rng.NextDouble ()> Settings.crossOverChance 
@@ -461,7 +480,7 @@ type Population(directory : string, newPop : bool) =
                         |> AI.Merge ai
                         |> fun a -> a.mutate () 
             do survivors.[index] <- item   )) |> ignore
-
+            ( *)
             let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
             
             let (fit,best) = Seq.head res
@@ -507,7 +526,7 @@ type GameViewModel() as self=
     
 
     let pop = new Population ("testPop", true) 
-    let (bestScore, bestSnake) =  pop.PlayGames 500 |>Seq.last |>  Seq.head 
+    let (bestScore, bestSnake) =  pop.PlayGames 20 |>Seq.last |>  Seq.head 
     let mutable ai = bestSnake
 
 
