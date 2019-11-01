@@ -597,7 +597,7 @@ type Population(source : PopulationSource) =
         Seq.init n (fun ord ->
             let res = this.allPlayOneGame snakes  //|> Array.ofSeq
 
-            snakes <- res |> Survivors_Rng//Survirors_roulette
+            snakes <- res |> Survivors_Rng   //Survivors_Rng
                           |> Array.map AI.MutateInPLace
             
             let (fit,best) = Array.head res
@@ -669,7 +669,12 @@ type GameViewModel() as self=
             ,p)
         |> Array.maxBy fst
         |> snd*)
-        
+    let loadPop () = 
+        let mutable i = 0
+        do Array.iter (fun i ->  
+            do AI Directory <|sprintf "%d" i    
+            do i<-i+1)
+        lastgame|>  Seq.head 
 
     let lastgame = pop.NormalTraining Settings.trainingGames |> Array.map snd //|>Seq.last  // 1 hour ~ 3000 runs
 
