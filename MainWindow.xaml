@@ -7,7 +7,7 @@
         xmlns:i="clr-namespace:System.Windows.Interactivity;assembly=System.Windows.Interactivity"
         xmlns:local="clr-namespace:SnakeGame;assembly=snake_Fs"
         mc:Ignorable="d"
-        Title="Snake" Height="500" Width="500" Focusable="True" >
+        Title="Snake" Height="500" Width="500" Focusable="True" Background="{Binding BackGround}" >
     
     
     
@@ -44,6 +44,6 @@
     </i:Interaction.Triggers>
 
 
-    <UniformGrid Name="Griddy" Columns="{Binding Colums}" Rows="{Binding Rows}" Focusable="False">
+    <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="False">
     </UniformGrid>
 </Window>

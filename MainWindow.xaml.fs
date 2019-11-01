@@ -29,30 +29,37 @@ type MainWindow = XAML<"MainWindow.xaml">
 
 
 module Settings= 
-    let rows = 9
+    let rows = 7
     let columns = rows
 
-    
+    let mutable logging = false
 
-    let BaseBrush = Brushes.Magenta//Brushes.WhiteSmoke
+    let BaseBrush = Brushes.LightGray
     let SnakeBrush = Brushes.Green
-    let FruitBrush = Brushes.Black
+    let FruitBrush = Brushes.Red
+    let BackGround = Brushes.WhiteSmoke
+
+
     let rng= new System.Random()
 
-    let trainingGames = 300
-    let initialPopulationsSpawn = 10
-    let PopulationSize = 30
+    let trainingGames = 100
+    let initialPopulationsSpawn = 5
+    let PopulationSize = 50
     let BatchSize = 5 + 1
     let MutationRate = 0.05
-    let NeuronLayerDim = [|24;6;4;3|]
+    let NeuronLayerDim = [|24;6;3|]
     
-    let WeightMutationChance = 0.2  ///how often are weigths mutated
-    let crossOverChance = 0.5
-    let TurnsUntilStarvingToDeath = 50
+    let WeightMutationChance = 0.1  ///how often are weigths mutated
+    let crossOverChance = 0.1
+    let TurnsUntilStarvingToDeath = rows * columns 
 
 
 
-    let ActivationFunction value = 1.0/(1.0 + exp(-value))   // sigmoid
+    let ActivationFunction value = 
+        //max 0.0 value          // relu
+        //  1.0/(1.0 + exp(-value))   // sigmoid
+        tanh value
+        
     let log (str:string) =
         Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore 
     
@@ -66,20 +73,31 @@ module Misc =
         box >> utr >> (=) uci.Tag
     | _ -> failwith "Expression is no union case."*)
         
-    let flip f = (fun x y -> f y x)
+    let inline flip f = (fun x y -> f y x)
         
-    let mapInPlace f (arr: 'a []) = 
+    let inline mapInPlace f (arr: 'a []) = 
         for i in [0..arr.Length-1] do
-            arr.[i] <- arr.[i] |> f 
+            arr.[i] <- f arr.[i]  
         arr
-    let reverseInPlace (arr: 'a []) = 
+
+    let inline mapInPlace_i f (arr: 'a []) = 
+        for i in [0..arr.Length-1] do
+            arr.[i] <- f i arr.[i]  
+        arr
+
+    let inline reverseInPlace (arr: 'a []) = 
         let lastIndex = arr.Length - 1
         for i in [0..lastIndex/2] do
             let tmp = arr.[i]
-            arr.[i] <- arr.[lastIndex-1]
-            arr.[lastIndex-1] <- tmp
+            arr.[i] <- arr.[lastIndex-i]
+            arr.[lastIndex-i] <- tmp
         arr
-        
+
+    let inline sortInPlaceBy (selector: 'a -> 'key) (arr: 'a []) =  
+        do Array.sortInPlaceBy selector arr
+        arr
+    
+    let inline MapInPlace_Parallel (mapping: 'T -> 'U) (array : 'T[]) : 'U[] =
     type Random with
     member this.getSign ()= 
         this.Next () > this.Next ()
@@ -278,10 +296,11 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
     member _.LookAround ()=
         let rotate n s = Seq.append (Seq.skip n s) (Seq.take n s |> Seq.rev)
         let tail = snake.Last
-        let dirs = seq{(- 1,0);(- 1,-1);(0,-1);(1,-1);(1,0);(1,1);(0,1);(-1,1)} // direction vectors ordered clockwise from Direction.Left
+        let dirs = [|(- 1,0);(- 1,-1);(0,-1);(1,-1);(1,0);(1,1);(0,1);(-1,1)|] // direction vectors ordered clockwise from Direction.Left
 
         dirs
         |> rotate (int snake.direction * 2)      // display inforamation relative to where the snake is looking
+            //TODO: better rotation
         |> Seq.map 
             (fun dir ->
                 let mutable distToWall = None
@@ -306,6 +325,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                 let toVal = Option.map (fun v->1.0/float v |> float ) >> Option.defaultValue 0.0
                 seq{ toVal distToWall; toVal distToSnake; toVal distToFruit})
         |> Seq.concat
+        
 
     member _.GetSeed ()= seed
     member this.Move () = this.Move snake.direction 
@@ -314,8 +334,11 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
 type score = int
 type traingResult= (score * Snake) []
 
+type GameSource = 
+| DrawFunc of draw:(CellState -> int -> int -> unit)
+| Game of GameManager
 
-type AI (game : GameManager,brainSource : NN_source) = 
+type AI (brainSource : NN_source) = 
     let rng = Settings.rng 
     let generateBrain ()= // layer => neuron => weight
         let a = rng.NextDouble ()
@@ -339,19 +362,31 @@ type AI (game : GameManager,brainSource : NN_source) =
         | Path(str) -> loadBrain str
         | Nothing -> generateBrain ()
     
-    //interface IComparable with
-      //  member _.CompareTo _  = 0  //equal with anything
     
 
     let Forward_prop inp = 
-        Seq.fold (fun input -> 
-            let biasedInp = Seq.append input (seq{1.0})
-            Seq.map (fun neuron -> 
-                Seq.fold2 (fun acc x weight-> acc + x * weight) 0.0 biasedInp neuron
+        //TODO benchmarks seq vs array
+        Array.fold (fun input -> 
+            let biasedInp = Array.append input ([|1.0|])
+            Array.map (fun neuron -> 
+                Array.fold2 (fun acc x weight-> acc + x * weight) 0.0 biasedInp neuron
                 |> Settings.ActivationFunction  )) inp brain
     
+    static let CalcIntensity i = 1.0//3 - i |> float
+
+    static let changeWeight (rng:Random) mutationIntensity weight = 
+        if rng.NextDouble () > Settings.WeightMutationChance
+        then weight
+        else  
+            rng.Next () - rng.Next () 
+            |> sign 
+            |> float 
+            |> (*) Settings.MutationRate 
+            |> (*) mutationIntensity
+            |> (+) weight
+
+
     member _.Brain = brain
-    member _.Game = game
     member _.Rng = rng
 
     member _.saveBrain (filePath:string) =
@@ -359,33 +394,40 @@ type AI (game : GameManager,brainSource : NN_source) =
         let ser = new Newtonsoft.Json.JsonSerializer()
         do ser.Serialize(stream, brain)
     
-    member _.TakeTurn () =
-            game.LookAround ()     
+    member _.TakeTurn (game: GameManager) =
+            game.LookAround () 
+            |> Array.ofSeq
             |> Forward_prop
             |> Seq.indexed
             |> Seq.maxBy snd
-            |> (fst >> enum<Directions>)
-            |> game.Move  
+            |> (fst >> enum<Directions> >> (fun a -> 
+                if Settings.logging then Settings.log <| sprintf "from NN: %A" a 
+                a))
+            |> game.Move
 
-    static member Create  (game : GameManager) (brainSource : NN_source) = new AI (game,brainSource)   // because construsctors cannot be partialy applied
-    static member Mutate (game:GameManager) (ai:AI) = 
+    ////static member Create (brainSource : NN_source)  = // because construsctors cannot be partialy applied
+       // match gameSource with
+      //  | DrawFunc(draw) -> new AI (GameManager draw,brainSource)
+       // | Game(game) -> new AI (game,brainSource)
+
+    static member Mutate (ai:AI) = 
         let map = Array.map
         let rng = ai.Rng
-        let changeWeight weight = 
-            if rng.NextDouble () > Settings.WeightMutationChance
-            then weight
-            else  
-                rng.Next () - rng.Next () 
-                |> sign 
-                |> float 
-                |> (*) Settings.MutationRate 
-                |> (*) (rng.NextDouble() - 1.0 |> sign |> float)
-                |> (+) weight
         ai.Brain 
-        |> Array.map(Array.map(Array.map(changeWeight)))
+        |> Array.mapi(fun i -> Array.map(Array.map(changeWeight rng (CalcIntensity i))))
         |> Net
-        |> AI.Create game
-    static member CrossOver (ai_1:AI) (ai_2:AI) (game:GameManager) = 
+        |> AI 
+        
+    // cannot abstract those two mutation functions into one because F# lacks higher kinded types so its imposible to pass eq. Array.map into the function and use it each time for diff generic parameter
+    static member MutateInPLace (ai:AI) = 
+        let map = Array.map
+        let rng = ai.Rng
+        do ai.Brain 
+           |> Misc.mapInPlace_i(fun i-> Misc.mapInPlace(Misc.mapInPlace(changeWeight rng (3 - i |> float))))
+           |> ignore
+        ai
+
+    static member CrossOver (ai_1:AI) (ai_2:AI)= 
         let rng = ai_1.Rng
         let pickWeight weight1 weight2 =
             if rng.NextDouble() > 0.5
@@ -394,7 +436,7 @@ type AI (game : GameManager,brainSource : NN_source) =
         (ai_1.Brain, ai_2.Brain)
         ||> Array.map2(Array.map2(Array.map2( pickWeight )))
         |> Net
-        |> AI.Create game
+        |> AI
 
 
 type PopulationSource = 
@@ -403,126 +445,159 @@ type PopulationSource =
 
 type Population(source : PopulationSource) = 
     let rng = new Random(Settings.rng.Next())
-    let GetGame () = new GameManager (fun _ _ _ -> ())
     let mutable snakes: AI [] = 
         match source with
         | Directory(directory) -> 
             if IO.Directory.Exists directory
-            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI.Create (GetGame())) |> Array.ofSeq
+            then IO.Directory.EnumerateFiles directory |> Seq.map (Path >> AI) |> Array.ofSeq
             else  failwith "directory not found"
-        | GenerateRandomly -> Array.init Settings.PopulationSize (fun _ -> AI.Create (GetGame()) Nothing)
+        | GenerateRandomly -> Array.init Settings.PopulationSize (fun _ -> AI Nothing)
             
     
-
-    //let GamePool_Normal = lazy (Array.init Settings.PopulationSize (fun _ -> new GameManager (fun _ _ _ -> ())))      // object pool
-    //let GamePool_Batches = lazy (Array.init Settings.PopulationSize (fun _ ->
-     //   Array.init Settings.PopulationSize (fun _ -> 
-    //        new GameManager (fun _ _ _ -> ()))))     
+    let GamePool_Normal = (Array.init Settings.PopulationSize (fun _ -> new GameManager (fun _ _ _ -> ())))      // object pool
+    let GamePool_Batches = (Array.init Settings.PopulationSize (fun _ -> 
+        Array.init Settings.BatchSize (fun _ -> 
+            new GameManager (fun _ _ _ -> ()))) )
 
 
     
     let CalcFitness res  =
-        let score=res.score
+        let score = res.score
         let turns = res.turns
-        turns + 
-        //pown 2 score + 
-        pown score 2 * 500 - (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
+       // turns + 
+        pown score 3   //- (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
+    
+    let Survivors_Rng (pop:(int*AI) []) = 
+        let RNG = (snd pop.[0]).Rng
+        let len = pop.Length
+        let getRand() = RNG.Next len |> RNG.Next
 
-    let roulette (pop:(int*AI) []) = 
+        Array.init len (fun i -> 
+            if i < len/20
+            then pop.[i] |> snd
+            else AI.CrossOver (pop.[getRand()]|> snd) (pop.[getRand()]|> snd)
+         )
+
+                
+
+    let Survirors_roulette (pop:(int*AI) []) = 
             
         let runningSums = 
             pop 
-            |> Array.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,new AI(GetGame (),Nothing)) // new specimen when rng hits 0
+            |> Array.scan (fun (st,_) (fit,ai) -> fit + st , ai ) (0,AI Nothing) // new specimen when rng hits 0
             
         //do Settings.log <| sprintf "%A" runningSums
 
-        let sum = Seq.last runningSums |> fst 
-        let chooseOne targetSum =  Seq.find (fun x -> fst x >= targetSum) runningSums 
+        let sum = Array.last runningSums |> fst 
+        let chooseOne targetSum =  Array.find (fun x -> fst x >= targetSum) runningSums 
         
         Array.init Settings.PopulationSize (fun i -> 
-            if i < Settings.PopulationSize/10
+            if i < pop.Length/10
             then pop.[i] |> snd
-            else rng.Next sum |> chooseOne |> snd |> AI.Mutate (GetGame ())
-            ) 
-
+            else 
+                let getAI () = rng.Next sum |> chooseOne |> snd  
+                if rng.NextDouble() > Settings.crossOverChance
+                then (getAI()) 
+                else AI.CrossOver (getAI()) (getAI()) 
+         )
+         
+            
     let PrepareBatches (arr: AI [])= 
         arr |> Array.map (fun ai -> 
             seq{
                 yield ai              //try removing it
                 for _ in 1.. Settings.BatchSize - 1  do  
                     yield 
-                        if rng.NextDouble() > Settings.crossOverChance
-                        then AI.Mutate (GetGame ()) ai
-                        else AI.CrossOver ai arr.[rng.Next arr.Length] (GetGame ())
+                        //if rng.NextDouble() > Settings.crossOverChance
+                        //then AI.Mutate ai
+                        //else 
+                        AI.CrossOver ai arr.[rng.Next arr.Length] 
             }   
         )
 
-    let play (ai:AI) = 
-        do ai.Game.Restart ()
-        Seq.initInfinite (fun _ -> ai.TakeTurn ())
-
-    let playUntilLose (ai:AI) = 
-        play ai 
+    let play (game :GameManager) (ai:AI) = 
+        do game.Restart ()
+        Seq.initInfinite (fun _ -> ai.TakeTurn game)
+    
+    let playUntilLose (game :GameManager)  (ai:AI) = 
+        play game ai 
         |> Seq.find TurnResult.isGameOver //(Aux.isUnionCase <@GameOver@>)
         |> TurnResult.unwrapGameOver
         |> CalcFitness
         , ai
+
+    /// plays n games without training and calculates the average fitness
+    let playUntilLose_avg n (game :GameManager) (ai:AI) = 
+        seq{1..n}
+        |>Seq.map (fun _-> 
+            play game ai 
+            |> Seq.find TurnResult.isGameOver //(Aux.isUnionCase <@GameOver@>)
+            |> TurnResult.unwrapGameOver
+            |> CalcFitness)
+        |> Seq.sum
+        |> fun aggregate -> aggregate / n
+        , ai
+
     
     let curry f = fun (a,b) -> f a b 
 
-    let BatchPlay (games:int) (batch: seq<AI>) =      // try doing one which also mutates
-        Seq.zip (
-            batch 
-            |> Seq.map (fun ai ->
-                   Seq.init games (fun _-> playUntilLose ai) 
-                   |> Seq.sumBy fst
-                   |> fun sum -> sum/games)
-        ) batch
-            
+    let rec BatchTrain n (games: seq<GameManager>) (batch: seq<AI>)  =      // try doing one which also mutates
+        if n = 0 
+        then batch |> Array.ofSeq
+        else
+            let res=
+                (games,batch)
+                ||> Seq.map2 playUntilLose
+                |> Seq.sortByDescending fst
+                |> Array.ofSeq
+
+            let (fitB,best) = Array.head res
+            if n = 1 then do Settings.log <| sprintf "     max fit: %d, avg %d" fitB (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
+
+            res 
+            |> Survirors_roulette
+            |> BatchTrain (n-1) games
+
+    
+
     member this.allPlayOneGame snakes= 
-        let res = 
-            (GamePool_Normal.Value,snakes) 
-            ||> Array.zip  // Seq would be better, but parallel-zip is defined only for arrays
-            //|> Array.ofSeq
-            |> Array.Parallel.map (fun x -> x ||> this.playUntilLose)  //parallel
-        do Array.sortInPlaceBy fst res 
-        res |> Array.rev//|> Misc.reverseInPlace
+        (GamePool_Normal,snakes) 
+        ||> Array.zip  // Seq would be better, but parallel-zip is defined only for arrays
+        |> Array.Parallel.map (fun x -> x ||> playUntilLose) 
+        |> Array.sortByDescending fst 
+       
     
     
     member this.BatchTraining n = 
-        
-           Seq.init n (fun ord ->
-               let batches = PrepareBatches snakes
-               let tmp =
-                    batches 
-                    |> Array.Parallel.map (BatchPlay 3)
-                    |> Array.map (Seq.maxBy fst)
-               do Array.sortInPlaceBy fst tmp 
-               let res = tmp|> Array.rev//|> Misc.reverseInPlace
+        let g = Seq.init n (fun ord ->
+            let res = 
+                    (GamePool_Batches, PrepareBatches snakes)
+                    ||> Array.zip
+                    |> Array.Parallel.map (fun (games, ais) -> BatchTrain 5 games ais)
+                    |> Array.map Array.head
+             
+            snakes<- res 
 
-               let getRand (rg:Random)= rng.Next Settings.PopulationSize |>  rg.Next  
+            do Settings.log <| sprintf "batch gen %d" ord
+               
+            res)  
+        g
+        |> Seq.last
+        |> this.allPlayOneGame
 
-               snakes<- res |> roulette
-                          
-               let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
-               
-               let (fitB,best) = Array.head res
-               let (fitW,best) = Array.last res
-               do Settings.log <| sprintf "gen %d, max fit: %d, last: %d ,  avg %d" ord fitB fitW  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
-               
-               res
-               )   
+
     member this.NormalTraining n = 
-        seq{1..n} |> Seq.map (fun ord ->
-            let res = this.allPlayOneGame () //|> Array.ofSeq
+        Seq.init n (fun ord ->
+            let res = this.allPlayOneGame snakes  //|> Array.ofSeq
 
-            let getRand (rg:Random)= rg.Next Settings.PopulationSize |>  rg.Next  
-
-            snakes <- res |> roulette
-                        //Misc.mapInPlace (fun ai -> ai.mutate())
+            snakes <- res |> Survivors_Rng//Survirors_roulette
+                          |> Array.map AI.MutateInPLace
             
+            let (fit,best) = Array.head res
+            do Settings.log <| sprintf "gen %d, max fit: %d, score: %d ,  avg %d" ord fit ( Math.Pow(float fit,(1.0/3.0)) |> int)  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
             
+            res
             (*let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
             Parallel.For(0,Settings.PopulationSize,(fun index -> 
             //Array.Parallel.init Settings.PopulationSize     // uses just half the cpu
@@ -540,14 +615,7 @@ type Population(source : PopulationSource) =
                         |> fun a -> a.mutate () 
             do survivors.[index] <- item   )) |> ignore
             ( *)
-            let i = Settings.rng.Next Settings.PopulationSize |> Settings.rng.Next          //TODO this selection may be too aggresive
-            
-            let (fitB,best) = Array.head res
-            let (fitW,best) = Array.last res
-            do Settings.log <| sprintf "gen %d, max fit: %d, last: %d ,  avg %d" ord fitB fitW  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
-            
-            res
-            )
+            )|> Seq.last
             
         
     
@@ -581,40 +649,46 @@ type GameViewModel() as self=
         Application.Current.Dispatcher.Invoke(fun _ -> do grid.[x, y].Fill <- col)    // needs a dispatcher, because timer events run on a separate thread
         
 
-    let timer = new System.Timers.Timer(Interval = 150.0)
+    let timer = new System.Timers.Timer(Interval = 100.0)
     
     let game = new GameManager(draw)
     
    
-    let initialSpawn = Array.init Settings.initialPopulationsSpawn <| fun _ -> 
-        let p =new Population (GenerateRandomly)
-        p.NormalTraining 15
-        |> Seq.skip 10
-        |> Seq.sumBy (fun arr -> arr|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
-        ,p
-    let lastgame = initialSpawn |> Array.maxBy fst |> fun (_, pop) ->  pop.NormalTraining 300 |>Seq.last  // 1 hour ~ 3000 runs
+    let pop = new Population (GenerateRandomly)
+        (*Array.init Settings.initialPopulationsSpawn ( fun _ -> 
+            let p =new Population (GenerateRandomly)
+            p.NormalTraining 15
+            |> Seq.skip 10
+            |> Seq.sumBy (fun arr -> arr|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
+            ,p)
+        |> Array.maxBy fst
+        |> snd*)
+        
+
+    let lastgame = pop.NormalTraining Settings.trainingGames |> Array.map snd //|>Seq.last  // 1 hour ~ 3000 runs
 
     let mutable i = 0
-    do lastgame |> Array.iter (fun (sc,ai) ->  
+    do lastgame |> Array.iter (fun ai ->  
         do ai.saveBrain <|sprintf "%d" i    
         do i<-i+1)
-    let (bestScore, bestSnake) = lastgame|>  Seq.head 
+    let bestSnake = lastgame|>  Seq.head 
     let mutable ai = bestSnake
 
 
     let resolveTurn = function
         | TurnOK _-> ()
         | GameOver result-> 
+            do Settings.log "hit game over"
             //ai<- new AI(Nothing)
             game.Restart()
             //Settings.log "new game"
 
-    
-
+    do Settings.logging <- true
     do timer.Elapsed.Add (fun _ -> 
-        ai.TakeTurn game
-        |> resolveTurn ) 
-        //())
+       ai.TakeTurn game
+       |> resolveTurn ) 
+
+
     do timer.Start()
     
 
@@ -634,22 +708,27 @@ type GameViewModel() as self=
                 then MusicPlayer.Play()
                 else MusicPlayer.Pause()
              
+          (*   
              
-             (*
     member _.Left_Cmd = self.Factory.CommandSync <| fun _ ->
+                do Settings.log "left" 
                 game.ChangeDirection Directions.Left
     member _.Right_Cmd = self.Factory.CommandSync <| fun _ ->
+                do Settings.log "right" 
                 game.ChangeDirection Directions.Right
     member _.Down_Cmd = self.Factory.CommandSync <| fun _ ->
+                do Settings.log "down" 
                 game.ChangeDirection Directions.Down
     member _.Up_Cmd = self.Factory.CommandSync <| fun _ ->
+                do Settings.log "up" 
                 game.ChangeDirection Directions.Up
-                *)
+                
 
-    
+    *)
     member _.Columns = Settings.columns
     member _.Rows = Settings.rows
-
+   
+    member _.Background = Settings.BackGround
     
     
 
