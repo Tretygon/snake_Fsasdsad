@@ -98,6 +98,12 @@ module Misc =
         arr
     
     let inline MapInPlace_Parallel (mapping: 'T -> 'U) (array : 'T[]) : 'U[] =
+        let inputLength = array.Length
+        let result = Array.zeroCreate inputLength
+        Parallel.For(0, inputLength, fun i ->           
+            result.[i] <- mapping array.[i]) |> ignore     
+        result
+
     type Random with
     member this.getSign ()= 
         this.Next () > this.Next ()
@@ -254,7 +260,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                     | Directions.Left -> -1
                     |_ -> 0
                 (diff + 4 + int snake.direction )% 4 |> enum<Directions>
-
+            //do if Settings.logging then Settings.log <| sprintf "absdir: %A" absDirection
             let dirToCoords = 
                 match absDirection with
                     | Directions.Left -> (-1,0)
