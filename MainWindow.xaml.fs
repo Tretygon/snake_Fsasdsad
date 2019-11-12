@@ -18,6 +18,28 @@ open ViewModule.Validation.FSharp
 //open Microsoft.FSharp.Quotations.Patterns
 //open Microsoft.FSharp.Reflection
 
+(* NOTES
+
+some population progress realy fast, others take 50+ generations to stop spinning in a circle and go for food
+
+tanh > relu > sigmoid(learns slow, runs slow)
+
+
+
+(11x11): 
+    at gen 200 some pops reach 40 food consistently, others barely 15   
+    every population goes primarily counter-clockwise, while it should be 50/50
+    50 food seems to be the maximum, then the snake gets too big and dies due to not enough information
+    'right' button seems to be mostly ignored 
+    wiggling is cool yet somewhat rare -> left&up spam
+
+
+
+
+
+
+snake as a game gets for the ai progressively harder as it grows larger, while other games such as tetris or flappy bird have their difficulty set by the speed of the game, which the ai does not care about, so once the ai solves the game loop it can continue indifinetely
+*)
 
 
 
@@ -29,12 +51,12 @@ type MainWindow = XAML<"MainWindow.xaml">
 
 
 module Settings= 
-    let rows = 7
+    let rows = 11
     let columns = rows
 
     let mutable logging = false
 
-    let BaseBrush = Brushes.LightGray
+    let BaseBrush = Brushes.WhiteSmoke //Brushes.LightGray
     let SnakeBrush = Brushes.Green
     let FruitBrush = Brushes.Red
     let BackGround = Brushes.WhiteSmoke
@@ -42,27 +64,28 @@ module Settings=
 
     let rng= new System.Random()
 
-    let trainingGames = 100
+    let trainingGames = 200
     let initialPopulationsSpawn = 5
-    let PopulationSize = 50
+    let PopulationSize = 70
     let BatchSize = 5 + 1
     let MutationRate = 0.05
     let NeuronLayerDim = [|24;6;3|]
     
     let WeightMutationChance = 0.1  ///how often are weigths mutated
-    let crossOverChance = 0.1
     let TurnsUntilStarvingToDeath = rows * columns 
 
 
 
-    let ActivationFunction value = 
+    let inline ActivationFunction value = 
         //max 0.0 value          // relu
-        //  1.0/(1.0 + exp(-value))   // sigmoid
+        //1.0/(1.0 + exp(-value))   // sigmoid
         tanh value
         
     let log (str:string) =
         Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore 
-    
+    let logLn (str:string) =
+        Task.Run (fun _ -> Diagnostics.Debug.Write str ) |> ignore 
+
 module Misc =
     (*let isUnionCase= function
     | NewTuple exprs -> 
@@ -407,7 +430,7 @@ type AI (brainSource : NN_source) =
             |> Seq.indexed
             |> Seq.maxBy snd
             |> (fst >> enum<Directions> >> (fun a -> 
-                if Settings.logging then Settings.log <| sprintf "from NN: %A" a 
+                if Settings.logging then Settings.log <| sprintf " %A" a 
                 a))
             |> game.Move
 
@@ -470,19 +493,23 @@ type Population(source : PopulationSource) =
     let CalcFitness res  =
         let score = res.score
         let turns = res.turns
-       // turns + 
-        pown score 3   //- (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
+        //turns + 
+       // pown score 2 * 500  
+       // - (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
-    
-    let Survivors_Rng (pop:(int*AI) []) = 
+        score
+        //- pown turns 2
+
+    let Survivors_Rng (pop:('a*AI) []) = 
         let RNG = (snd pop.[0]).Rng
         let len = pop.Length
         let getRand() = RNG.Next len |> RNG.Next
 
         Array.init len (fun i -> 
-            if i < len/20
-            then pop.[i] |> snd
-            else AI.CrossOver (pop.[getRand()]|> snd) (pop.[getRand()]|> snd)
+           // if i < len/20
+            //then pop.[i] |> snd
+            //else 
+            AI.CrossOver (pop.[getRand()]|> snd) (pop.[getRand()]|> snd) |> AI.MutateInPLace
          )
 
                 
@@ -507,7 +534,7 @@ type Population(source : PopulationSource) =
                 then (getAI()) 
                 else AI.CrossOver (getAI()) (getAI()) 
          )
-         
+         (*
             
     let PrepareBatches (arr: AI [])= 
         arr |> Array.map (fun ai -> 
@@ -521,6 +548,7 @@ type Population(source : PopulationSource) =
                         AI.CrossOver ai arr.[rng.Next arr.Length] 
             }   
         )
+         *)
 
     let play (game :GameManager) (ai:AI) = 
         do game.Restart ()
@@ -530,7 +558,7 @@ type Population(source : PopulationSource) =
         play game ai 
         |> Seq.find TurnResult.isGameOver //(Aux.isUnionCase <@GameOver@>)
         |> TurnResult.unwrapGameOver
-        |> CalcFitness
+        |> fun res -> CalcFitness res , res
         , ai
 
     /// plays n games without training and calculates the average fitness
@@ -547,7 +575,7 @@ type Population(source : PopulationSource) =
 
     
     let curry f = fun (a,b) -> f a b 
-
+    (*
     let rec BatchTrain n (games: seq<GameManager>) (batch: seq<AI>)  =      // try doing one which also mutates
         if n = 0 
         then batch |> Array.ofSeq
@@ -555,7 +583,7 @@ type Population(source : PopulationSource) =
             let res=
                 (games,batch)
                 ||> Seq.map2 playUntilLose
-                |> Seq.sortByDescending fst
+                |> Seq.sortByDescending (fst>>fst)
                 |> Array.ofSeq
 
             let (fitB,best) = Array.head res
@@ -565,6 +593,7 @@ type Population(source : PopulationSource) =
             |> Survirors_roulette
             |> BatchTrain (n-1) games
 
+    *)
     
 
     member this.allPlayOneGame snakes= 
@@ -572,9 +601,8 @@ type Population(source : PopulationSource) =
         ||> Array.zip  // Seq would be better, but parallel-zip is defined only for arrays
         |> Array.Parallel.map (fun x -> x ||> playUntilLose) 
         |> Array.sortByDescending fst 
-       
     
-    
+    (*
     member this.BatchTraining n = 
         let g = Seq.init n (fun ord ->
             let res = 
@@ -591,17 +619,18 @@ type Population(source : PopulationSource) =
         g
         |> Seq.last
         |> this.allPlayOneGame
+    *)
 
 
     member this.NormalTraining n = 
         Seq.init n (fun ord ->
             let res = this.allPlayOneGame snakes  //|> Array.ofSeq
 
-            snakes <- res |> Survivors_Rng   //Survivors_Rng
-                          |> Array.map AI.MutateInPLace
+            snakes <- res |> Survivors_Rng   
+                          //|> Array.map AI.MutateInPLace
             
-            let (fit,best) = Array.head res
-            do Settings.log <| sprintf "gen %d, max fit: %d, score: %d ,  avg %d" ord fit ( Math.Pow(float fit,(1.0/3.0)) |> int)  (res|> Seq.sumBy fst |> fun x -> x / Settings.PopulationSize)
+            let ((fit,{ turns = turns; score = score }),best) = Array.head res
+            do Settings.log <| sprintf "gen %d, max fit: %d, score: %d , turns: %d,  avg %d" ord fit score turns  (res|> Seq.sumBy (fst>>fst) |> fun x -> x / Settings.PopulationSize)
             
             res
             (*let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
@@ -669,13 +698,13 @@ type GameViewModel() as self=
             ,p)
         |> Array.maxBy fst
         |> snd*)
-    let loadPop () = 
+    (*let loadPop () = 
         let mutable i = 0
         do Array.iter (fun i ->  
             do AI Directory <|sprintf "%d" i    
             do i<-i+1)
         lastgame|>  Seq.head 
-
+        *)
     let lastgame = pop.NormalTraining Settings.trainingGames |> Array.map snd //|>Seq.last  // 1 hour ~ 3000 runs
 
     let mutable i = 0
