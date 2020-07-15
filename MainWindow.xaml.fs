@@ -345,8 +345,8 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                         match Array2D.get stateField <|| newCell with 
                             | CellState.Snake when tail <> newCell-> if distToSnake.IsNone then distToSnake <- Some dist 
                             | CellState.Fruit-> if distToFruit.IsNone then distToFruit <- Some dist
-                            | _ -> ()
-                        do lookInDirection newCell (dist+1)
+                            | _ -> lookInDirection newCell (dist+1)//()
+                        //do lookInDirection newCell (dist+1)
                    
 
                 do lookInDirection snake.Head 1
@@ -530,9 +530,7 @@ type Population(source : PopulationSource) =
             then pop.[i] |> snd
             else 
                 let getAI () = rng.Next sum |> chooseOne |> snd  
-                if rng.NextDouble() > Settings.crossOverChance
-                then (getAI()) 
-                else AI.CrossOver (getAI()) (getAI()) 
+                AI.CrossOver (getAI()) (getAI()) 
          )
          (*
             
