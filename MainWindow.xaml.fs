@@ -7,7 +7,7 @@ open System.Threading.Tasks
 open System.Windows
 open System.Windows.Media
 open System.Windows.Shapes
-
+open System.Windows.Media.Imaging
 open FsXaml
 
 
@@ -64,16 +64,15 @@ module Settings=
 
     let rng= new System.Random()
 
-    let trainingGames = 200
+    let trainingGames = 200//how long learning takes
     let initialPopulationsSpawn = 5
-    let PopulationSize = 70
+    let PopulationSize = 70              
     let BatchSize = 5 + 1
-    let MutationRate = 0.05
+    let MutationRate = 0.02             // how much intensity mutation has
     let NeuronLayerDim = [|24;6;3|]
     
     let WeightMutationChance = 0.1  ///how often are weigths mutated
-    let TurnsUntilStarvingToDeath = rows * columns 
-
+    let TurnsUntilStarvingToDeath = rows * columns  //snake automatically dies after not eating for several turns to prevent running in circles indifinetely
 
 
     let inline ActivationFunction value = 
@@ -108,6 +107,9 @@ module Misc =
             arr.[i] <- f i arr.[i]  
         arr
 
+    let inline map2i (f:int->'a->'b->'c) (arr1:'a[]) (arr2:'b[])=
+        [|for i in 0..arr1.Length-1 do 
+            f i (arr1.[i]) (arr2.[i])|]
     let inline reverseInPlace (arr: 'a []) = 
         let lastIndex = arr.Length - 1
         for i in [0..lastIndex/2] do
@@ -270,7 +272,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
 
     //member this.Restart () = this.Restart <| rng.Next()
 
-    member _.Move relDirection = 
+    member _.Move relDirection =     // snake inputs direction relative to where its facing because its easier to train it this way
 
         
         if snake.turnWithoutSnack = Settings.TurnsUntilStarvingToDeath 
@@ -278,11 +280,11 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
         else
             let absDirection =
                 let diff = 
-                    match relDirection with
+                    match relDirection with  // snake can choose to go right, left or forward
                     | Directions.Right -> 1 
                     | Directions.Left -> -1
                     |_ -> 0
-                (diff + 4 + int snake.direction )% 4 |> enum<Directions>
+                (diff + 4 + int snake.direction ) % 4 |> enum<Directions> // the +4 is there if diff = -1 to make the expression a positive integer
             //do if Settings.logging then Settings.log <| sprintf "absdir: %A" absDirection
             let dirToCoords = 
                 match absDirection with
@@ -290,7 +292,6 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                     | Directions.Up -> (0,-1)
                     | Directions.Right -> (1,0)
                     | Directions.Down -> (0,1)
-            //when dir != Directions.Right
 
             let (newX,newY) = addTuples snake.Head dirToCoords 
             //do Settings.log <| sprintf "%A  ->    (%d,%d)  ...%A" snake.Head newX newY directions
@@ -323,37 +324,39 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                  | CellState.Snake when snake.Last = (newX,newY) -> moveToEmpty ()
                  | CellState.Snake -> CurrentScore GameOver
     member _.LookAround ()=
-        let rotate n s = Seq.append (Seq.skip n s) (Seq.take n s |> Seq.rev)
+        //let rotate n s = Seq.append (Seq.skip n s) (Seq.take n s |> Seq.rev)//https://stackoverflow.com/questions/876293/fastest-algorithm-for-circle-shift-n-sized-array-for-m-position
         let tail = snake.Last
         let dirs = [|(- 1,0);(- 1,-1);(0,-1);(1,-1);(1,0);(1,1);(0,1);(-1,1)|] // direction vectors ordered clockwise from Direction.Left
+        
+        [| for i in [0..7] do
+            let dir = dirs.[(i + int snake.direction * 2)%8] // display inforamation relative to where the snake is looking; *2 because snake cannot be in diagonal direction
 
-        dirs
-        |> rotate (int snake.direction * 2)      // display inforamation relative to where the snake is looking
-            //TODO: better rotation
-        |> Seq.map 
-            (fun dir ->
-                let mutable distToWall = None
-                let mutable distToSnake = None
-                let mutable distToFruit = None
+        
+            let mutable distToWall = None
+            let mutable distToSnake = None
+            let mutable distToFruit = None
 
-                let rec lookInDirection cell dist =  // terminates so long there is a wall in each direction
-                    let newCell = addTuples cell dir
+            let rec lookInDirection cell dist =  // terminates so long there is a wall in each direction
+                let newCell = addTuples cell dir
 
-                    if outOfBounds <|| newCell
-                    then if distToWall.IsNone then distToWall <- Some dist
-                    else
-                        match Array2D.get stateField <|| newCell with 
-                            | CellState.Snake when tail <> newCell-> if distToSnake.IsNone then distToSnake <- Some dist 
-                            | CellState.Fruit-> if distToFruit.IsNone then distToFruit <- Some dist
-                            | _ -> lookInDirection newCell (dist+1)//()
-                        //do lookInDirection newCell (dist+1)
+                if outOfBounds <|| newCell
+                then if distToWall.IsNone then distToWall <- Some dist
+                else
+                    match Array2D.get stateField <|| newCell with 
+                        | CellState.Snake when tail <> newCell-> if distToSnake.IsNone then distToSnake <- Some dist 
+                        | CellState.Fruit-> if distToFruit.IsNone then distToFruit <- Some dist
+                        | _ -> lookInDirection newCell (dist+1)//()
+                    //do lookInDirection newCell (dist+1)
                    
 
-                do lookInDirection snake.Head 1
+            do lookInDirection snake.Head 1
 
-                let toVal = Option.map (fun v->1.0/float v |> float ) >> Option.defaultValue 0.0
-                seq{ toVal distToWall; toVal distToSnake; toVal distToFruit})
-        |> Seq.concat
+            let toVal = Option.map (fun v->1.0/float v |> float ) >> Option.defaultValue 0.0   // the further away found object is the lesser the value
+            yield toVal distToWall
+            yield toVal distToSnake
+            yield toVal distToFruit 
+          //bias
+        |]
         
 
     member _.GetSeed ()= seed
@@ -375,8 +378,8 @@ type AI (brainSource : NN_source) =
             |> Array.pairwise
             |> Array.map (fun (last,next) ->
                 Array.init next (fun _ -> 
-                    Array.init (last+1) (fun _ -> (rng.NextDouble () * 2.0 - 1.0)))) // weigths between (-1,1)    
-        //last+1 to because of bias
+                    Array.init last (fun _ -> (rng.NextDouble () * 2.0 - 1.0)))) // weigths between (-1,1)    
+       
 
     let loadBrain (filePath:string) =
         let stream = new System.IO.StreamReader(filePath)
@@ -395,13 +398,12 @@ type AI (brainSource : NN_source) =
 
     let Forward_prop inp = 
         //TODO benchmarks seq vs array
-        Array.fold (fun input -> 
-            let biasedInp = Array.append input ([|1.0|])
-            Array.map (fun neuron -> 
-                Array.fold2 (fun acc x weight-> acc + x * weight) 0.0 biasedInp neuron
+        Array.fold (fun lastLayer -> 
+            Array.map (fun neuron -> //all weights that go to a neuron in next layer
+                Array.fold2 (fun acc x weight-> acc + x * weight) 0.0 lastLayer neuron
                 |> Settings.ActivationFunction  )) inp brain
     
-    static let CalcIntensity i = 1.0//3 - i |> float
+    static let CalcIntensity i = Settings.NeuronLayerDim.Length - i |> float // big intensity at first layer, small in the last layer
 
     static let changeWeight (rng:Random) mutationIntensity weight = 
         if rng.NextDouble () > Settings.WeightMutationChance
@@ -440,7 +442,6 @@ type AI (brainSource : NN_source) =
        // | Game(game) -> new AI (game,brainSource)
 
     static member Mutate (ai:AI) = 
-        let map = Array.map
         let rng = ai.Rng
         ai.Brain 
         |> Array.mapi(fun i -> Array.map(Array.map(changeWeight rng (CalcIntensity i))))
@@ -452,18 +453,21 @@ type AI (brainSource : NN_source) =
         let map = Array.map
         let rng = ai.Rng
         do ai.Brain 
-           |> Misc.mapInPlace_i(fun i-> Misc.mapInPlace(Misc.mapInPlace(changeWeight rng (3 - i |> float))))
+           |> Misc.mapInPlace_i(fun i-> 
+                Misc.mapInPlace(Misc.mapInPlace(changeWeight rng (CalcIntensity i)))) // i is layer in neural network
            |> ignore
         ai
 
     static member CrossOver (ai_1:AI) (ai_2:AI)= 
         let rng = ai_1.Rng
-        let pickWeight weight1 weight2 =
+        let pickWeight i weight1 weight2 =
             if rng.NextDouble() > 0.5
             then weight1
             else weight2
+            |> changeWeight rng (CalcIntensity i)
+            
         (ai_1.Brain, ai_2.Brain)
-        ||> Array.map2(Array.map2(Array.map2( pickWeight )))
+        ||> Misc.map2i (fun i->Array.map2(Array.map2( pickWeight i)))
         |> Net
         |> AI
 
@@ -497,19 +501,19 @@ type Population(source : PopulationSource) =
        // pown score 2 * 500  
        // - (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
-        score
+        score*40 - turns
         //- pown turns 2
 
     let Survivors_Rng (pop:('a*AI) []) = 
         let RNG = (snd pop.[0]).Rng
         let len = pop.Length
-        let getRand() = RNG.Next len |> RNG.Next
+        let getRand () = RNG.Next len |> RNG.Next
 
         Array.init len (fun i -> 
            // if i < len/20
             //then pop.[i] |> snd
             //else 
-            AI.CrossOver (pop.[getRand()]|> snd) (pop.[getRand()]|> snd) |> AI.MutateInPLace
+            AI.CrossOver (pop.[getRand()] |> snd) (pop.[getRand()] |> snd) 
          )
 
                 
@@ -573,6 +577,9 @@ type Population(source : PopulationSource) =
 
     
     let curry f = fun (a,b) -> f a b 
+    let uncurry f = fun a b -> f (a,b)
+
+
     (*
     let rec BatchTrain n (games: seq<GameManager>) (batch: seq<AI>)  =      // try doing one which also mutates
         if n = 0 
@@ -628,7 +635,7 @@ type Population(source : PopulationSource) =
                           //|> Array.map AI.MutateInPLace
             
             let ((fit,{ turns = turns; score = score }),best) = Array.head res
-            do Settings.log <| sprintf "gen %d, max fit: %d, score: %d , turns: %d,  avg %d" ord fit score turns  (res|> Seq.sumBy (fst>>fst) |> fun x -> x / Settings.PopulationSize)
+            do Settings.log <| sprintf "gen %d, score: %d , turns: %d,  avg %d" ord score turns  (res|> Seq.sumBy (fst>>fst) |> fun x -> x / Settings.PopulationSize)
             
             res
             (*let survivors : AI [] = Array.zeroCreate Settings.PopulationSize
@@ -651,8 +658,8 @@ type Population(source : PopulationSource) =
             )|> Seq.last
             
         
-    
-    
+[<StructuralEquality;StructuralComparison>]
+type activity =  Player_plays | Ai_plays | Training | Nothing
 
 type GameViewModel() as self=
     inherit ViewModelBase()
@@ -665,7 +672,22 @@ type GameViewModel() as self=
     do MusicPlayer.MediaEnded.Add (fun _ -> 
             do MusicPlayer.Position <- TimeSpan.Zero
             do MusicPlayer.Play ())
-
+            
+    (*let BitmapToImageSource (bitmap: Bitmap) = 
+        //let bitmap = new System.Windows.Media.Imaging.WriteableBitmap ()
+        using (new Memory()) <| fun memory 
+            
+    let bt (bitmap: WriteableBitmap) = 
+        do bitmap.
+        do bitmap.Save(memory, System.Drawing.Imaging.ImageFormat.Bmp);
+        do memory.Position <- 0;
+        let bitmapimage = new BitmapImage()
+        do bitmapimage.BeginInit()
+        do bitmapimage.StreamSource <- memory
+        do bitmapimage.CacheOption <- BitmapCacheOption.OnLoad
+        do bitmapimage.EndInit();
+    
+        return bitmapimage;*)
 
     let grid  = Array2D.init Settings.columns Settings.rows <| fun _ _ ->
         new Rectangle(
@@ -696,12 +718,12 @@ type GameViewModel() as self=
             ,p)
         |> Array.maxBy fst
         |> snd*)
-    (*let loadPop () = 
-        let mutable i = 0
-        do Array.iter (fun i ->  
+    let loadPop () = 42
+        (*
+        [|for i in ([0..Settings.PopulationSize-1]) do
             do AI Directory <|sprintf "%d" i    
             do i<-i+1)
-        lastgame|>  Seq.head 
+        |]
         *)
     let lastgame = pop.NormalTraining Settings.trainingGames |> Array.map snd //|>Seq.last  // 1 hour ~ 3000 runs
 
@@ -726,52 +748,50 @@ type GameViewModel() as self=
        ai.TakeTurn game
        |> resolveTurn ) 
 
-
-    do timer.Start()
+       
     
 
-        
+    do timer.Start()
+
+
+    member val Activity = Nothing with get,set
+    member _.Columns = Settings.columns
+    member _.Rows = Settings.rows
+    member _.Background = Settings.BackGround
+     
+    member val Score = 0 with get,set
+    member val Paused = false with get, set
 
     member _.OnLoaded = 
         self.Factory.CommandSyncParam <| fun (gr : System.Windows.Controls.Primitives.UniformGrid) -> 
             for y in 0..Settings.rows-1 do
                 for x in 0..Settings.columns-1 do
-                    Array2D.get grid  x y |> gr.Children.Add |> ignore       // Array2D.iter messes up the ordering in uniformgrid, so i needs to be done manualy through for-cycles
+                    grid.[x,y] |> gr.Children.Add |> ignore       // Array2D.iter messes up the ordering in uniformgrid, so i needs to be done manualy through for-cycles
             //do MusicPlayer.Play()
 
-    
-    member this.Stop_cmd = self.Factory.CommandSync <| fun _ ->
-                do timer.Enabled <- not timer.Enabled
-                if timer.Enabled
-                then MusicPlayer.Play()
-                else MusicPlayer.Pause()
-             
-          (*   
-             
+    member _.StopTraining_cmd = self.Factory.CommandSync <| fun _ ->
+    member _.GeneratePopulation_cmd = self.Factory.CommandSync <| fun _ ->
+    member _.LoadPopulation_cmd = self.Factory.CommandSync <| fun _ ->
+    member _.SavePopulation_cmd = self.Factory.CommandSync <| fun _ ->
+
+    member _.Pause_cmd = self.Factory.CommandSync <| fun _ ->
+                do self.Paused <- not self.Paused
+                do timer.Enabled <- not self.Paused
+                if self.Paused
+                   then MusicPlayer.Play()
+                   else MusicPlayer.Pause()
     member _.Left_Cmd = self.Factory.CommandSync <| fun _ ->
-                do Settings.log "left" 
-                game.ChangeDirection Directions.Left
+                if self.Activity.Equals(Player_plays)
+                then game.ChangeDirection Directions.Left
     member _.Right_Cmd = self.Factory.CommandSync <| fun _ ->
-                do Settings.log "right" 
-                game.ChangeDirection Directions.Right
+                if self.Activity.Equals(Player_plays)
+                then game.ChangeDirection Directions.Right
     member _.Down_Cmd = self.Factory.CommandSync <| fun _ ->
-                do Settings.log "down" 
-                game.ChangeDirection Directions.Down
+                if self.Activity.Equals(Player_plays)
+                then game.ChangeDirection Directions.Down
     member _.Up_Cmd = self.Factory.CommandSync <| fun _ ->
-                do Settings.log "up" 
-                game.ChangeDirection Directions.Up
-                
-
-    *)
-    member _.Columns = Settings.columns
-    member _.Rows = Settings.rows
-   
-    member _.Background = Settings.BackGround
-    
-    
-
-    
-        
+                if self.Activity.Equals(Player_plays)
+                then game.ChangeDirection Directions.Up     
         
         (*
 [<System.Runtime.CompilerServices.IsReadOnly; Struct>]
@@ -796,3 +816,4 @@ type Cell = struct
         member this.Add (x,y) = new Cell(this.x+x, this.y+y)
 end
             *)
+            
