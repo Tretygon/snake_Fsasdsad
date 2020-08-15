@@ -7,13 +7,20 @@
         xmlns:i="clr-namespace:System.Windows.Interactivity;assembly=System.Windows.Interactivity"
         xmlns:local="clr-namespace:SnakeGame;assembly=snake_Fs"
         mc:Ignorable="d"
-        Title="Snake" Height="500" Width="1000" Focusable="True" Background="{Binding BackGround}" >
+        Title="Snake" Height="500" Width="1200" Focusable="True" Background="{Binding BackGround}" >
     <Window.Resources>
-        
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles.xaml"/>
+                <ResourceDictionary>
+                    <local:BoolToString x:Key="BoolToString" />
+                </ResourceDictionary>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Window.Resources>
     
     <Window.DataContext>
-        <local:GameViewModel />
+        <local:GameViewModel/>
     </Window.DataContext>
     
     <Window.InputBindings>
@@ -27,13 +34,37 @@
 
     <i:Interaction.Triggers>
         <i:EventTrigger  EventName="Loaded">
-            <i:InvokeCommandAction Command="{Binding OnLoaded}" CommandParameter="{Binding ElementName=Griddy}"/>
+            <i:InvokeCommandAction Command="{Binding Initialize_cmd}" CommandParameter="{Binding ElementName=Griddy}"/>
         </i:EventTrigger>
     </i:Interaction.Triggers>
 
     <UniformGrid Columns="2" Rows="1">
-        <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="False"/>
-        <Canvas/>
+        <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="False" />
+        <Grid Background="LightGray">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition/>
+                <ColumnDefinition/>
+                <ColumnDefinition/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition/>
+                <RowDefinition/>
+                <RowDefinition/>
+                <RowDefinition/>
+            </Grid.RowDefinitions>
+            <DataGrid Name="messegePresenter" ItemsSource="{Binding TrainingProgressMessages}" AutoGenerateColumns="False"  Grid.RowSpan="3" Focusable="False" >
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Generation" Binding="{Binding generation}" />
+                    <DataGridTextColumn Header="Score"  Binding="{Binding score}" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <Button Command="{Binding PlayPlayer_cmd}" Grid.Column="1">human</Button>
+            <Button Command="{Binding PlayAI_cmd}" Grid.Column="2" >bot</Button>
+            <Button Command="{Binding StopPlaying_cmd}" Grid.Column="1" Grid.Row="1">stop playing</Button>
+            <Button Command="{Binding Pause_cmd}" Grid.Column="2" Grid.Row="1" Content="{Binding Paused, Converter={StaticResource BoolToString}, ConverterParameter=Resume|Pause}"></Button>
+            <Button IsEnabled="True" Command="{Binding Train_cmd}" Grid.Column="1" Grid.Row="2" Content="{Binding Training, Converter={StaticResource BoolToString}, ConverterParameter=Stop_Training|Train}"/>
+            <Label Content="{Binding Paused}" Grid.Column="1" Grid.Row="3"/>
+        </Grid>
     </UniformGrid>
 
 
