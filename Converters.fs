@@ -34,6 +34,11 @@ type Eq_conv() =
             |> box
         member _.ConvertBack(_,_,_,_) = failwith "undefined"
 
+[<ValueConversion(typeof<bool>, typeof<bool>)>]
+type Not() =
+    interface IValueConverter with
+        member _.Convert(value, targetType, parameter, culture) =  value :?> bool |> not |> box
+        member _.ConvertBack(_,_,_,_) = failwith "undefined"
 
 [<ValueConversion(typeof<bool>, typeof<string>)>]
 type BoolToString() =

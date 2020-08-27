@@ -18,6 +18,10 @@
     <GradientStop Color="SaddleBrown" Offset="1"/>
   </RadialGradientBrush>
 
+  <RadialGradientBrush x:Key="OffBrush" Opacity="0.7" SpreadMethod="Pad" MappingMode="RelativeToBoundingBox" ColorInterpolationMode="SRgbLinearInterpolation">
+    <GradientStop Color="#FFBDBDBD" Offset="1"/>
+    <GradientStop Color="White" Offset="0.150"/>
+  </RadialGradientBrush>
 
   <LinearGradientBrush x:Key="MenuBackground" EndPoint="0.5,1" MappingMode="RelativeToBoundingBox" StartPoint="0.5,0">
     <GradientStop Color="#FF2DAE10" Offset="1"/>
@@ -53,26 +57,35 @@
     <Setter Property="BorderBrush" Value="Black"/>
     <Setter Property="Focusable" Value="False"/>
   </Style>
+  
   <Style  TargetType="Button">
     <Setter Property="HorizontalContentAlignment" Value="Center"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="FontSize" Value="15"/>
-    <Setter Property="FontWeight" Value="DemiBold"/>
+    <Setter Property="FontWeight" Value="Thin"/>
+    <Setter Property="FontFamily" Value="Comic Sans MS"/>
+    
     <Setter Property="Focusable" Value="False"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
           <Grid x:Name="griddy">
-            <Border x:Name="border" Margin="5,2,5,2" BorderBrush="Transparent" BorderThickness="2.5" CornerRadius="10" Effect="{StaticResource ButtonShadowDrop}" Background="{TemplateBinding Background}"/>
+            <Border x:Name="border" Margin="5,2,5,2" BorderBrush="Transparent" BorderThickness="5.5" CornerRadius="15" Effect="{StaticResource ButtonShadowDrop}" Background="{TemplateBinding Background}"/>
             <ContentPresenter  HorizontalAlignment="Center"  VerticalAlignment="Center"/>
           </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="Button.IsPressed" Value="True">
               <Setter TargetName="border"  Property="Margin" Value="0" />
+              <Setter TargetName="border"  Property="Background" Value="{StaticResource pressBrush}" />
             </Trigger>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter TargetName="border"  Property="Background"  Value="{StaticResource hoverBrush}"/>
             </Trigger>
+            
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="border"  Property="Background"  Value="{StaticResource OffBrush}"/>
+            </Trigger>
+            
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>

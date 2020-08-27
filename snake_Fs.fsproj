@@ -52,16 +52,17 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Types.fs" />
-    <Content Include="FodyWeavers.xml" />
     <None Include="App.config" />
     <Content Include="packages.config" />
     <Resource Include="App.xaml" />
     <Compile Include="Converters.fs" />
     <Resource Include="Styles.xaml" />
+    <Compile Include="ExampleSnake.fs" />
     <Compile Include="MainWindow.xaml.fs" />
     <Resource Include="MainWindow.xaml" />
     <Compile Include="GameVM.fs" />
     <Compile Include="App.fs" />
+    <Content Include="FodyWeavers.xml" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FsCheck">
@@ -155,12 +156,12 @@
     <Reference Include="UIAutomationTypes" />
     <Reference Include="WindowsBase" />
   </ItemGroup>
-  <Import Project="packages\Fody.6.2.0\build\Fody.targets" Condition="Exists('packages\Fody.6.2.0\build\Fody.targets')" />
+  <Import Project="packages\Fody.6.1.1\build\Fody.targets" Condition="Exists('packages\Fody.6.1.1\build\Fody.targets')" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('packages\Fody.6.2.0\build\Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Fody.6.2.0\build\Fody.targets'))" />
+    <Error Condition="!Exists('packages\Fody.6.1.1\build\Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Fody.6.1.1\build\Fody.targets'))" />
     <Error Condition="!Exists('packages\PropertyChanged.Fody.3.2.8\build\PropertyChanged.Fody.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\PropertyChanged.Fody.3.2.8\build\PropertyChanged.Fody.props'))" />
   </Target>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

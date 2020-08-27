@@ -9,6 +9,10 @@ open System.Threading
 open System.Windows
 open System.Windows.Media
 open System.Windows.Shapes
+open System.Xml
+open System.Xml.Serialization
+open System.Runtime.Serialization
+open System.Xml.Schema
 open System.Windows.Media.Imaging
 open System.IO
 open FsXaml
@@ -25,22 +29,28 @@ open ViewModule.Validation.FSharp
 try adding new specimen during the training
 
 
-some population progress realy fast, others take 50+ generations to stop spinning in a circle and go for food
+some population progress realy fast, others take 500+ generations to stop spinning in a circle and go for food
 
-tanh > relu > sigmoid(learns slow, runs slow)
+activation function should not matter, although tanh once it starts converging, it is consistent and sharp, meanwhile RELU is pretty inconsistent
 
+one population had 40 score on 3 gen   ...   wow   ... and then went back to max 4 for the next 100 gens
 
+recurring problem seems to be collecting fruit on the edges and especialy in corners; this is often times solved by traversing the game field mainly on edges
+
+adding bias seems to be very harmful to the leaning process
 
 (11x11): 
     at gen 200 some pops reach 40 food consistently, others barely 15   
     every population goes primarily counter-clockwise, while it should be 50/50
-    50 food seems to be the maximum, then the snake gets too big and dies due to not enough information
+    length of 1/3 to 1/2 of tiles food seems to be the maximum, then the snake gets too big and dies due to not enough information
     'right' button seems to be mostly ignored 
     wiggling is cool yet somewhat rare -> left&up spam
 
+    most populations choose to ignore one turn button altogether, as it is easier to learn and somewhat just as effective as using both left and right
 
 
 
+datagrid rows can be selected to let the best AI of the generation play
 
 
 snake as a game gets for the ai progressively harder as it grows larger, while other games such as tetris or flappy bird have their difficulty set by the speed of the game, which the ai does not care about, so once the ai solves the game loop it can continue indifinetely
@@ -56,7 +66,7 @@ type MainWindow = XAML<"MainWindow.xaml">
 
 
 module Settings= 
-    let rows = 11
+    let rows = 10
     let columns = rows
 
     let mutable logging = false
@@ -70,20 +80,22 @@ module Settings=
     let rng= new System.Random()
 
     let trainingGames = 200//how long learning takes
-    let initialPopulationsSpawn = 5
-    let PopulationSize = 70              
+    let PopulationSize = 100             
     let BatchSize = 5 + 1
-    let MutationRate = 0.02             // how much intensity mutation has
-    let NeuronLayerDim = [|24;8;3|]
+    let MutationRate = 0.02                 // how much intensity mutation has
+    let WeightMutationChance = 0.10         // how often are weigths mutated
+    let NeuronLayerDim = [|24;18;3|]
     
-    let WeightMutationChance = 0.1  ///how often are weigths mutated
-    let TurnsUntilStarvingToDeath = rows * columns  //snake automatically dies after not eating for several turns to prevent running in circles indifinetely
+    let TurnsUntilStarvingToDeath = rows * columns / 3 //snake automatically dies after not eating for several turns to prevent running in circles indifinetely
 
 
     let inline ActivationFunction value = 
-        //max 0.0 value          // relu
-        //1.0/(1.0 + exp(-value))   // sigmoid
-        tanh value
+        //if value > 0.0 then value else 0.0 // relu
+        
+        
+       // 1.0/(1.0 + exp(-value))   // sigmoid
+        
+       tanh value
         
     let log (str:string) =
         Task.Run (fun _ -> Diagnostics.Debug.WriteLine str ) |> ignore 
@@ -107,14 +119,23 @@ module Misc =
             arr.[i] <- f arr.[i]  
         arr
 
+    let fold2Biased folder (state: float) (array1:float[]) (array2:float []) =
+        let f = OptimizedClosures.FSharpFunc<_,_,_,_>.Adapt(folder)
+        let mutable state = state 
+        for i = 0 to array1.Length-1 do 
+            state <- f.Invoke(state,array1.[i],array2.[i])
+        f.Invoke(state,0.3,array2.[array1.Length])
+
     let inline mapInPlace_i f (arr: 'a []) = 
         for i in [0..arr.Length-1] do
             arr.[i] <- f i arr.[i]  
         arr
 
     let inline map2i (f:int->'a->'b->'c) (arr1:'a[]) (arr2:'b[])=
-        [|for i in 0..arr1.Length-1 do 
-            f i (arr1.[i]) (arr2.[i])|]
+        [|
+            for i in 0..arr1.Length-1 -> 
+                f i (arr1.[i]) (arr2.[i])
+        |]
 
     let inline reverseInPlace (arr: 'a []) = 
         let lastIndex = arr.Length - 1
@@ -161,7 +182,7 @@ type Snake =
         body : LinkedList<struct(int*int)> 
         direction : Directions
         score : int
-        turnWithoutSnack : int
+        turnsWithoutSnack : int
         turns : int
     }
     member this.Last = this.body.Last.Value
@@ -173,7 +194,7 @@ type Snake =
             body = b;
             direction = dir
             score = 0;
-            turnWithoutSnack = 0;
+            turnsWithoutSnack = 0;
             turns = 0
         }
 
@@ -181,6 +202,7 @@ type ResultThusFar = { turns : int; score :int; }
 
 type TurnResult = 
     | GameOver of ResultThusFar
+    | AteFruit of ResultThusFar
     | TurnOK of ResultThusFar
 
     static member isOK r= 
@@ -207,6 +229,7 @@ type NN = float [] [] []
 
 type NN_source =
     | Net of NN
+    | Clone of NN
     | Path of string
     | GenerateRandom
 
@@ -215,7 +238,7 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
     let mutable seed = Settings.rng.Next ()
     let  rng = new Random(seed)
     
-    let directionChange = new Queue<Directions>()  //without queue user input would sometimes get ignored
+    let directionChange = new Queue<Directions>()  //without this queue user input would sometimes get ignored
 
     let addTuples struct (a,b) struct (c,d) = struct (a+c,b+d)
     let randDir () = rng.Next 4 |> enum<Directions>
@@ -275,6 +298,10 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
         fruit <- GenerateFruit ()
         changeCell CellState.Fruit <~| fruit 
 
+    member self.HardRestart ()=
+         Array2D.iteri (fun x y _ -> changeCell CellState.Empty x y) stateField
+         self.Restart ()
+
     member _.MoveAbs dir = 
         let dirToCoords = 
             match dir with
@@ -286,17 +313,17 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
         //do Settings.log <| sprintf "%A  ->    (%d,%d)  ...%A" snake.Head newX newY directions
         let moveToEmpty ()= 
             do changeCell CellState.Empty <~| snake.Last
-            do changeCell CellState.Snake newX newY
-            do snake.body.RemoveLast ()
+            do changeCell CellState.Snake newX newY 
+            if snake.body.Count > 0 then do snake.body.RemoveLast ()
             do snake.body.AddFirst(struct (newX,newY)) |>  ignore
             snake <- {snake with 
                         turns = snake.turns + 1;
                         direction = dir; 
-                        turnWithoutSnack = snake.turnWithoutSnack + 1}
+                        turnsWithoutSnack = snake.turnsWithoutSnack + 1}
             CurrentScore TurnOK
 
         if outOfBounds newX newY
-        then CurrentScore GameOver
+        then  CurrentScore GameOver
         else match stateField.[newX, newY] with 
                 | CellState.Fruit -> 
                     do changeCell CellState.Snake newX newY 
@@ -305,17 +332,17 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                     do changeCell CellState.Fruit <~| fruit
                     snake <- {snake with 
                                 direction = dir; 
-                                turnWithoutSnack = 0;
+                                turnsWithoutSnack = 0;
                                 turns = snake.turns + 1;
                                 score = snake.score + 1}
-                    CurrentScore TurnOK
+                    CurrentScore AteFruit
                 | CellState.Empty -> moveToEmpty ()
                 | CellState.Snake when snake.Last = (newX,newY) -> moveToEmpty ()
                 | CellState.Snake -> CurrentScore GameOver
 
     member this.MoveRel dir =     // snake inputs direction relative to where its facing because its easier to train it this way
-        if snake.turnWithoutSnack = Settings.TurnsUntilStarvingToDeath 
-        then CurrentScore GameOver
+        if snake.turnsWithoutSnack = Settings.TurnsUntilStarvingToDeath  + snake.score * 2   // add score to make lategame easier
+        then GameOver {score=snake.score  ;turns = snake.turns * 3/2}
         else
             let absDirection =
                 let diff = 
@@ -347,7 +374,8 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
                     match Array2D.get stateField <~| newCell with 
                         | CellState.Snake when tail <> newCell-> if distToSnake.IsNone then distToSnake <- Some dist 
                         | CellState.Fruit-> if distToFruit.IsNone then distToFruit <- Some dist
-                        | _ -> lookInDirection newCell (dist+1)
+                        | _ -> ()
+                    lookInDirection newCell (dist+1)
                    
 
             do lookInDirection snake.Head 1
@@ -356,13 +384,16 @@ type GameManager(draw:(CellState -> int -> int -> unit)) =
             yield toVal distToWall
             yield toVal distToSnake
             yield toVal distToFruit 
-          //bias?
         |]
         
 
     member _.GetSeed ()= seed
     member this.Move () = if directionChange.Count > 0 
-                            then this.MoveAbs (directionChange.Dequeue()) 
+                            then 
+                                let dir = directionChange.Dequeue()
+                                if (int dir + 2) % 4 <> int snake.direction || snake.body.Count = 1 // movement in opposite direction allowed only if snake has lenght 1
+                                    then this.MoveAbs (dir) 
+                                    else this.Move ()
                             else this.MoveRel Directions.Up
     member _.ChangeDirection dir = directionChange.Enqueue(dir)
 
@@ -380,8 +411,8 @@ type AI (brainSource : NN_source) =
         Settings.NeuronLayerDim 
             |> Array.pairwise
             |> Array.map (fun (last,next) ->
-                Array.init next (fun _ -> 
-                    Array.init last (fun _ -> (rng.NextDouble () * 2.0 - 1.0)))) // weigths between (-1,1)    
+                Array.init next (fun _ ->    
+                    Array.init (last+1) (fun _ -> (rng.NextDouble () * 2.0 - 1.0)))) // weigths between (-1,1)          // the +1 is bias   
        
 
     let loadBrain (filePath:string) =
@@ -394,15 +425,16 @@ type AI (brainSource : NN_source) =
     let brain = 
         match brainSource with 
         | Net(nn) -> nn
+        | Clone(nn) -> Array.copy nn |> Misc.mapInPlace (Array.copy >> Misc.mapInPlace Array.copy)
         | Path(str) -> loadBrain str
         | GenerateRandom -> generateBrain ()
     
     
 
-    let Forward_prop inp = 
-        Array.fold (fun lastLayer -> 
-            Array.map (fun neuron -> //all weights that go to a neuron in next layer
-                Array.fold2 (fun acc x weight-> acc + x * weight) 0.0 lastLayer neuron
+    let Forward_prop inp =
+        Array.fold (fun  lastLayer-> 
+           Array.map (fun  neuron -> //all weights that go to a neuron in next layer
+                Misc.fold2Biased (fun acc x weight-> acc + x * weight) 0.0 lastLayer neuron
                 |> Settings.ActivationFunction  )) inp brain
     
     static let CalcIntensity i = Settings.NeuronLayerDim.Length - i |> float // big intensity at first layer, small in the last layer
@@ -423,18 +455,19 @@ type AI (brainSource : NN_source) =
     member _.Rng = rng
 
     member _.saveBrain (filePath:string) =
-        let stream = new System.IO.StreamWriter(filePath)
-        let ser = new Newtonsoft.Json.JsonSerializer()
-        do ser.Serialize(stream, brain)
-    
+       // if not <| File.Exists filePath then File.Create filePath |> ignore
+        //let stream = new System.IO.StreamWriter( filePath)
+        let s = Newtonsoft.Json.JsonConvert.SerializeObject brain 
+        File.WriteAllText(filePath,s)
+        //File.WriteAllText(filePath, )
+        //do ser.Serialize(stream, brain)
+
     member _.TakeTurn (game: GameManager) =
             game.LookAround () 
             |> Forward_prop
             |> Seq.indexed
             |> Seq.maxBy snd
-            |> (fst >> enum<Directions> >> (fun a -> 
-                if Settings.logging then Settings.log <| sprintf " %A" a 
-                a))
+            |> (fst >> enum<Directions>)
             |> game.MoveRel
 
     ////static member Create (brainSource : NN_source)  = // because construsctors cannot be partialy applied
@@ -459,6 +492,7 @@ type AI (brainSource : NN_source) =
            |> ignore
         ai
 
+    /// Randomly combines two specimen into a new one
     static member CrossOver (ai_1:AI) (ai_2:AI)= 
         let rng = ai_1.Rng
         let pickWeight i weight1 weight2 =
@@ -480,8 +514,12 @@ type fitness = int
 type GenerationReport = {
     generation: int
     score : int
+    ai: AI 
 }
     
+type Population ={
+    t:int
+}
 
 module Population = 
     let rng = new Random(Settings.rng.Next())
@@ -495,7 +533,7 @@ module Population =
         snakes
         |> Seq.indexed
         |> Seq.iter (fun (i,ai) ->  
-            do ai.saveBrain <|sprintf @"%s/%d" directory i)
+            do ai.saveBrain <| sprintf @"%d" i)//sprintf @"%s/%d.xml" directory i)
 
     let GenerateRandomly () = Array.init Settings.PopulationSize (fun _ -> AI GenerateRandom)
             
@@ -514,10 +552,10 @@ module Population =
        // pown score 2 * 500  
        // - (Math.Pow(float score, 1.2) * Math.Pow((float turns/4.0),1.3) |> int)
         //Settings.scoreToFitness res.score + Settings.turnsToFitness res.turns
-        score*40 - turns
+        score*(Settings.rows + Settings.columns)*3/2 - turns
         //- pown turns 2
 
-    let Survivors_Rng (pop:('a*AI) []) = 
+    let GetSurvivors (pop:('a*AI) []) = 
         let RNG = (snd pop.[0]).Rng
         let len = pop.Length
         let getRand () = RNG.Next len |> RNG.Next
@@ -596,9 +634,12 @@ module Population =
                         
                     let ((fit,{ turns = turns; score = score }),best) = Array.head res
                     
-                    do log i score
+                    do log best i score
                     
-                    res |> Survivors_Rng 
+                    let New = res |> GetSurvivors 
+                    if stopToken.StopReguested 
+                        then population
+                        else New
             ) snakes 
     /// plays n games without training and calculates the average fitness
    (* let playUntilLose_avg n (game :GameManager) (ai:AI) = 
@@ -727,7 +768,7 @@ type GameViewModel() as self=
             | CellState.Fruit -> Settings.FruitBrush
         ui <| fun _ -> grid.[x, y].Fill <- col   // needs a dispatcher, because timer events run on a separate thread
 
-    let timer = new System.Timers.Timer(Interval = 100.0)
+    let timer = new System.Timers.Timer(Interval = 50.0)
     
     let game = GameManager(draw)
     
@@ -742,52 +783,84 @@ type GameViewModel() as self=
             do AI Directory <|sprintf "%d" i    
             do i<-i+1)
         |]
+
         *)
+
+    /// allows ui to update
+    //https://stackoverflow.com/questions/18410532/wpf-how-to-wait-for-binding-update-to-occur-before-processing-more-code
+    let Sync() = Application.Current.Dispatcher.Invoke(fun _ ->(),System.Windows.Threading.DispatcherPriority.Background)|>ignore
+
+    let TogglePause() =
+        do self.Paused <- not self.Paused
+        do timer.Enabled <- not self.Paused
+        if self.Paused  
+           then MusicPlayer.Pause()
+           else if self.MusicEnabled then MusicPlayer.Play()
+
+    let Pause() =
+        do self.Paused <- true
+        do timer.Enabled <- false
+
+    let PauseEverythingAnd f = 
+        let isP = self.Paused
+        Pause()
+        Sync()
+        f ()
+        Sync()
+        if not isP then TogglePause()
+
     let resolveTurn = function
         | TurnOK _-> ()
+        | AteFruit _ -> self.Score <- self.Score + 1
         | GameOver result-> 
             do Settings.log "hit game over"
-            game.Restart()
+            self.Score <-0
+            game.HardRestart()
 
     do Settings.logging <- false
 
     
 
-    do timer.Start()
 
-    let mutable population = Population.GenerateRandomly ()
+    let mutable population = Array.init Settings.PopulationSize <| fun _ -> AI <| Clone ExampleSnake.brain
 
-    member val Activity = NoOnePlays with get,set
+    member val PlayerPlays = false with get,set
     member val TrainingGames = Settings.trainingGames with get,set 
     member val Score = 0 with get,set
-    member val Paused = false with get, set
+    member val Paused = true with get, set 
     member val SavePath = "" with get,set
-    member val Ai = population.[0] with get, set
-    member val MusicEnabled = true with get,set
+    member val Ai =  AI <| Net ExampleSnake.brain   with get, set
+    member val MusicEnabled = false with get,set
     member val StopToken= new StopToken()
     member val Generation = 1 with get, set 
     member val Training = false with get, set
-
+    member val LastIterationFinished = true with get, set
+    member val dg : System.Windows.Controls.DataGrid Option = None with get, set
     member _.Columns = Settings.columns
     member _.Rows = Settings.rows
     member _.Background = Settings.BackGround
 
     member val TrainingProgressMessages = ObservableCollection<GenerationReport>()
-
+    
     member _.Initialize_cmd = 
         self.Factory.CommandSyncParam <| fun (gr : System.Windows.Controls.Primitives.UniformGrid) -> 
-            
+           
             for y in 0..Settings.rows-1 do
                 for x in 0..Settings.columns-1 do
                     grid.[x,y] |> gr.Children.Add |> ignore       // Array2D.iter messes up the ordering in uniformgrid, so i needs to be done manualy through for-cycles
             
             do timer.Elapsed.Add <| fun _ -> 
-                match self.Activity with
-                    | Ai_plays -> self.Ai.TakeTurn game |> resolveTurn
-                    | Player_plays -> game.Move () |> resolveTurn
-                    | _ -> ()
-
-            //if self.MusicEnabled then MusicPlayer.Play()
+                if not self.Paused && self.LastIterationFinished then 
+                    self.LastIterationFinished <- false
+                    if self.PlayerPlays
+                        then game.Move () |> resolveTurn
+                        else  self.Ai.TakeTurn game |> resolveTurn
+                    self.LastIterationFinished <- true
+            if self.MusicEnabled then MusicPlayer.Play()
+            async{
+                do! Async.Sleep 1000
+                ui <| fun _ -> timer.Start()
+            } |> Async.Start
     
     member _.Train_cmd = self.Factory.CommandSync <| fun _(*(textb : System.Windows.Controls.TextBlock)*) ->    // 1 hour ~ 3000 runs
         if self.Training 
@@ -795,59 +868,76 @@ type GameViewModel() as self=
             else
                 do self.Training <- true
                 do self.StopToken.StopReguested <- false
+                do self.PlayerPlays <- false
+                do timer.Interval <- 40.0
+                do self.dg.Value.SelectedItem <- null
+                do Pause ()
                 let work () = 
-                    let logFunc gen score = async {
+                    let logFunc ai gen score = async {
                         ui <| fun _ ->
-                            let item = {score=score; generation=gen}
-                            do self.TrainingProgressMessages.Insert(0,item) }|> Async.Start 
+                            let item = {score=score; generation=gen; ai=ai}
+                            do self.TrainingProgressMessages.Insert(0,item) }|> Async.Start
 
                     let newPop = Population.NormalTraining self.TrainingGames population self.StopToken logFunc
                     ui <| fun _ -> 
                         do self.Ai <- Array.last newPop
-                        population <- newPop
-                        self.Training <- false
-
+                           population <- newPop
+                           self.Training <- false
+                           self.dg.Value.SelectedIndex <- 0
+                        Population.Save population "Population"
+                    Sync()
+                    ui <| fun _ -> TogglePause()
+                    Sync()
                 do Thread(work).Start()
 
-    member public _.PlayAI_cmd = self.Factory.CommandSync <| fun _ ->
-        do self.Activity <- Ai_plays
-
-    member public _.PlayPlayer_cmd = self.Factory.CommandSync <| fun _ ->
-        do self.Activity <- Player_plays
-
-    member _.StopPlaying_cmd = self.Factory.CommandSync <| fun _ ->
-        do self.Activity <- NoOnePlays
-        do game.Restart ()
-
+    member public _.ChangePlayer_cmd = self.Factory.CommandSync <| fun _ ->
+        do self.PlayerPlays <- not self.PlayerPlays
+        if self.PlayerPlays 
+        then timer.Interval <- 100.0
+        else timer.Interval <- 40.0
 
     member _.GeneratePopulation_cmd = self.Factory.CommandSync <| fun _ ->
         do population <- Population.GenerateRandomly()
+        self.TrainingProgressMessages.Clear()
 
     member _.LoadPopulation_cmd = self.Factory.CommandSync <| fun _ ->
-        ChooseDirectory <| fun path -> population <- Population.Load path
+       PauseEverythingAnd (fun _ -> ChooseDirectory <| fun path -> population <- Population.Load path)
+    
+    member _.SelectedGenChanged_cmd = self.Factory.CommandSync <| fun _->
+        if self.dg.Value.SelectedItem <> null 
+        then self.Ai <- (self.dg.Value.SelectedItem :?> GenerationReport).ai
+        else self.Ai <- population.[0]
+
+    member _.Unselect_cmd = self.Factory.CommandSync<| fun _ ->
+        self.dg.Value.SelectedItem <- null
+        
+    member _.GetDg_cmd = self.Factory.CommandSyncParam <| fun (dg : System.Windows.Controls.DataGrid) ->
+        self.dg  <- Some dg
         
 
     member _.SavePopulation_cmd = self.Factory.CommandSync <| fun _ ->
-        ChooseDirectory <| Population.Save population
+        PauseEverythingAnd (fun _ -> ChooseDirectory <| Population.Save population)
+      
+    member _.ToggleMusic_cmd = self.Factory.CommandSync <| fun _ ->
+        self.MusicEnabled <- not self.MusicEnabled 
+        if self.MusicEnabled && not self.Paused
+            then MusicPlayer.Play()
+            else MusicPlayer.Stop()
 
     member _.Pause_cmd = self.Factory.CommandSync <| fun _ ->
-        do self.Paused <- not self.Paused
-        do timer.Enabled <- not self.Paused
-        if self.Paused
-           then MusicPlayer.Pause()
-           else MusicPlayer.Play()
+       TogglePause()
 
     member _.Left_Cmd = self.Factory.CommandSync <| fun _ ->
-        if self.Activity = Player_plays && not self.Paused
+        if self.PlayerPlays && not self.Paused
         then game.ChangeDirection Directions.Left
     member _.Right_Cmd = self.Factory.CommandSync <| fun _ ->
-        if self.Activity.Equals(Player_plays) && not self.Paused
+        if self.PlayerPlays && not self.Paused
         then game.ChangeDirection Directions.Right
     member _.Down_Cmd = self.Factory.CommandSync <| fun _ ->
-        if self.Activity.Equals(Player_plays) && not self.Paused
+        if self.PlayerPlays && not self.Paused
         then game.ChangeDirection Directions.Down
     member _.Up_Cmd = self.Factory.CommandSync <| fun _ ->
-        if self.Activity.Equals(Player_plays) && not self.Paused
+        if self.PlayerPlays && not self.Paused 
         then game.ChangeDirection Directions.Up     
     
             
