@@ -25,11 +25,18 @@
     </Window.DataContext>
     
     <Window.InputBindings>
-        <KeyBinding Key="Space" Command="{Binding Stop_Cmd}"/>
+        <KeyBinding Key="Space" Command="{Binding Pause_cmd}"/>
         <KeyBinding Key="Up" Command="{Binding Up_Cmd}"/>
+        <KeyBinding Key="W" Command="{Binding Up_Cmd}"/>
+
         <KeyBinding Key="Down" Command="{Binding Down_Cmd}"/>
+        <KeyBinding Key="S" Command="{Binding Down_Cmd}"/>
+        
         <KeyBinding Key="Left" Command="{Binding Left_Cmd}"/>
+        <KeyBinding Key="A" Command="{Binding Left_Cmd}"/>
+        
         <KeyBinding Key="Right" Command="{Binding Right_Cmd}"/>
+        <KeyBinding Key="D" Command="{Binding Right_Cmd}"/>
     </Window.InputBindings>
 
 
@@ -41,7 +48,7 @@
     </i:Interaction.Triggers>
 
     <UniformGrid Columns="2" Rows="1" Background="WhiteSmoke">
-        <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="False" Background="WhiteSmoke"/>
+        <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="True" Background="WhiteSmoke"/>
         <Grid Background="LightGray">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition/>
@@ -54,7 +61,7 @@
                 <RowDefinition/>
                 <RowDefinition/>
             </Grid.RowDefinitions>
-            <DataGrid Name="messagePresenter" SelectionMode="Single" HorizontalAlignment="Center" CanUserSortColumns="False"  HorizontalScrollBarVisibility="Hidden" ColumnWidth="1*" HorizontalContentAlignment="Stretch" IsReadOnly="True" ItemsSource="{Binding TrainingProgressMessages}"  AutoGenerateColumns="False"  Grid.RowSpan="4" Focusable="False" >
+            <DataGrid Name="messagePresenter"  SelectionMode="Single" HorizontalAlignment="Center" CanUserSortColumns="True"  HorizontalScrollBarVisibility="Hidden" ColumnWidth="1*" HorizontalContentAlignment="Stretch" IsReadOnly="True" ItemsSource="{Binding TrainingProgressMessages}"  AutoGenerateColumns="False"  Grid.RowSpan="4" Focusable="False" >
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Generation" Binding="{Binding generation}" />
                     <DataGridTextColumn Header="Score"  Binding="{Binding score}" />
