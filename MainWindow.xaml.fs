@@ -33,6 +33,8 @@ Major parts the program is split into:
     Population - group of AI that compete to get better
     GUI - Allows the user to control the application and visualize the current game state
 
+structure diagram: https://drive.google.com/file/d/1WRbTG-MDYLCUJCyy3G-27LuXoD9cK_V1/view?usp=sharing
+
 GameManager holds information about the game state as a matrix with 'in what state each cell is'. 
 Provides logic for moving the snake: 
     bump into a wall => game over
@@ -52,6 +54,8 @@ Only the better individuals get to survive/reproduce => each generation is proba
 GUI is written in the framework WPF fully in MVVM => Bindings are used in order to do anything.
 INotifyPropertyChanged is automatically injected using library Fody to enable usage of bindings in the GUI.
 Rows in the training history Datagrid can be selected to let the best AI of the generation play. Can be done on-the-fly.
+
+
 --------------------------------------------------------------------------
 Development notes:
 
