@@ -184,7 +184,7 @@ type GameViewModel() as self=
         Sync()
         f ()
         Sync()
-        if not isP then TogglePause()
+        if not isP then TogglePause()  //don't unpause if the game was originally paused
 
     let resolveTurn = function
         | TurnOK _-> ()
@@ -241,7 +241,7 @@ type GameViewModel() as self=
     ///begins training of the population 
     member _.Train_cmd = self.Factory.CommandSync <| fun _->    // 1 hour ~ 3000 runs
         if self.Training 
-            then do self.StopToken.StopReguested <- true
+            then do self.StopToken.StopReguested <- true    //request training to end
             else
                 do self.Training <- true
                 do self.StopToken.StopReguested <- false
@@ -249,15 +249,16 @@ type GameViewModel() as self=
                 do timer.Interval <- 40.0
                 do self.dg.Value.SelectedItem <- null
                 do Pause ()
+
                 let work () = 
-                    let logFunc ai gen score = async {
+                    let logFunc ai gen score = async {  //report status to UI
                         ui <| fun _ ->
                             self.Generation <- self.Generation + 1
                             let item = {score=score; generation=self.Generation; ai=ai}
                             do self.TrainingProgressMessages.Insert(0,item) }|> Async.Start
 
                     let newPop = Population.Train self.TrainingGames population self.StopToken logFunc
-                    ui <| fun _ -> 
+                    ui <| fun _ -> //change to the new population
                         do self.Ai <- Array.last newPop
                            population <- newPop
                            self.Training <- false
@@ -266,6 +267,7 @@ type GameViewModel() as self=
                     Sync()
                     ui <| fun _ -> TogglePause()
                     Sync()
+
                 // run on a background thread
                 do Thread(work).Start()
 
@@ -301,7 +303,7 @@ type GameViewModel() as self=
     member _.Unselect_cmd = self.Factory.CommandSync<| fun _ ->
         self.dg.Value.SelectedItem <- null
         
-    ///get the training history datagrid
+    ///get the training-history-datagrid
     //used to get reference to the datagrid
     //needed because of MVVM
     member _.GetDg_cmd = self.Factory.CommandSyncParam <| fun (dg : System.Windows.Controls.DataGrid) ->
