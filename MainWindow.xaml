@@ -49,7 +49,7 @@
 
     <UniformGrid Columns="2" Rows="1" Background="WhiteSmoke">
         <UniformGrid Name="Griddy" Columns="{Binding Columns}" Rows="{Binding Rows}" Focusable="True" Background="WhiteSmoke"/>
-        <Grid Background="LightGray">
+        <Grid Background="WhiteSmoke">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition/>
                 <ColumnDefinition/>

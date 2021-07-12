@@ -21,74 +21,83 @@ open ViewModule
 open ViewModule.FSharp
 open ViewModule.Validation.FSharp
 
-(* NOTES
+(* Development Documentation
 
+Recreation of the game snake
+allows playing the gase as a player, letting a selected AI play or train a new population
 
+Major parts the program is split into:
+    Snake - Holds all the information about the snake
+    GameManager - Holds the information about the state of playing field
+    AI - Makes turn decisions based on the game state
+    Population - group of AI that compete to get better
+    GUI - Allows the user to control the application and visualize the current game state
 
+GameManager holds information about the game state as a matrix with 'in what state each cell is'. 
+Provides logic for moving the snake: 
+    bump into a wall => game over
+    eat fruit => grow and generate new fruit someplace else
+    empty cell => move head and tail
 
-(11x11): 
-    at gen 200 some pops reach 40 food consistently, others barely 15   
-    every population goes primarily counter-clockwise, while it should be 50/50
-    length of 1/3 to 1/2 of tiles food seems to be the maximum, then the snake gets too big and dies due to not enough information
-    'right' button seems to be mostly ignored 
-    wiggling is cool yet somewhat rare -> left&up spam
+AI is modeled as a Neural network (MLP - multi layer perceptron): 
+    - as input it gets the nearest (wall, fruit, snake) cells in each of the 8 directions
+    - this information is fed forward through the neural network
+    - outputs probability of the movable directions => forward, left, right
 
-    
-    
-most populations choose to ignore one turn button altogether, 
-as it is easier to learn and somewhat just as effective as using both left and right
+The Population module provides tools to manage the population and do the genetic algorithm
+Training is done through random optimization - weights of the neural network are randomly mutated
+Genetic algorithm - population of 100 individuals, all play one game and based on how good they do they are selected to cross/mutate and form the next generation.
+Only the better individuals get to survive/reproduce => each generation is probabilistically stronger than the last one.
 
-population data could be in the Population module instead of mainwindow?
+GUI is written in the framework WPF fully in MVVM => Bindings are used in order to do anything.
+INotifyPropertyChanged is automatically injected using library Fody to enable usage of bindings in the GUI.
+Rows in the training history Datagrid can be selected to let the best AI of the generation play. Can be done on-the-fly.
+--------------------------------------------------------------------------
+Development notes:
 
-datagrid rows can be selected to let the best AI of the generation play
+New population is generated randomly and thus will always either spin in circles or go immediately run into walls. 
+It takes several generations before it starts going for the fruit and evades walls.
 
-
-snake as a game gets for the ai progressively harder as it grows larger, 
+Snake as a game gets for the ai progressively harder as it grows larger, 
 while other games such as tetris and flappy bird have their difficulty set by the speed of the game, 
-which the ai does not care about, so once the ai solves the game loop it can continue indifinetely
-
-swapping AI can be done on-the-fly by selecting different row in the training history datagrid
-
-
--------------------------------------------------------------------
-INotifyPropertyChanged is automatically injected using Fody
-to enable usage of bindings in the GUI
-
-AI is modeled as Multi layer perceptron (MLP) 
-training is done by randomly changing the weights, then letting the AI play and see how good it does
-
-perception:
-    the AI sees the nearest (wall, fruit, snake) cells in each of the 8 directions
-    this information is fed forward through the neural network and outputs probability of the 4 movable directions
-
-New population is generated randomly and thus will spin in circles or go to immediately run into walls. 
-It takes several generations before it starts going for the fruit.
+which makes it harder for a human player, but the ai does not care at all, so once the ai solves the game loop it can continue indifinetely.
+In snake, however, when the snake gets big the AI needs different strategy 
 
 recurring problem the AI faces seems to be collecting fruit on the edges and especialy in corners; this is often times solved by traversing the game field mainly on edges
-The AI, as the training progresses, gets better in later stages but worse at the start. This could be solved by using different NN at the start and later.
+The AI, as the training progresses, gets better in later stages but worse at the start. It could be solved by using different NN at the start and later.
 In later stages, when the snake gets large, the AI struggles as it doesn't have full information of the playing field and then proceeds to bumb into itself.
--------------------------------------------------------------------
-user documentation:
+
+The AI generally learns to use only one of right or left directions. 
+This could be solved by making so sort of special execises, one for each side, to force the AI to learn to use both directions. 
+However its probably too much work for too little gain.
+---------------------------------------------------------------------------
+User documentation:
+
 This application lets you play the game Snake
 or you can train your very own AI to play it for you!
 
-controls:
+The AI is trained in so-called population consisting of 100 individual AIs, 
+which compete against each other to achieve as high score as possible. 
+After competing, the best individuals are used to create the next generation. 
+So each generation is better than the last.
+
+Controls:
     space - pause/unpause depending on whether the game is currently paused
     W - go down
     S - go up
     A - go right 
     D - go left
 
-window buttons:
-    pause/play- pause/unpause the game
-    new population - randomly generate a whole new population
-    train - train the current population / stop the training
-    save - save the population to a directory
-    load - load the population from a directory
-    music on / music off - turn music on/off
-    human/bot - switches control of the snake between the player and the AI 
+Window buttons:
+    Pause/Play- pause/unpause the game
+    New population - randomly generate a whole new population
+    Train - train the current population / stop the training
+    Save - save the population to a directory
+    Load - load the population from a directory
+    Music on / Music off - turn music on/off
+    Human/bot - switches control of the snake between the player and the AI 
 
-You can select a row in the training history to select the best AI from that generation to play the game
+You can select a row in the training history to select the best AI from that generation to play the game. Works on-the-fly while an AI plays.
 
 
 *)
@@ -112,6 +121,8 @@ type GameViewModel() as self=
     let MusicPlayer = MediaPlayer()
     
     do MusicPlayer.Open(new Uri("../../Music.mp3", UriKind.Relative));
+
+    //loop music
     do MusicPlayer.MediaEnded.Add (fun _ -> 
             do MusicPlayer.Position <- TimeSpan.Zero
             do MusicPlayer.Play ())
@@ -211,7 +222,7 @@ type GameViewModel() as self=
                     grid.[x,y] |> gr.Children.Add |> ignore       // Array2D.iter messes up the ordering in uniformgrid, so i needs to be done manualy through for-cycles
             
             do timer.Elapsed.Add <| fun _ -> // wait for the last move to finish before starting another; helps when laggy
-                if not self.Paused && self.LastIterationFinished then 
+                if not self.Paused && self.LastIterationFinished then // lastIterationFinished is not interlocked but the worst thing that can happen is a frameskip
                     self.LastIterationFinished <- false
                     if self.PlayerPlays
                         then game.Move () |> resolveTurn
@@ -287,7 +298,7 @@ type GameViewModel() as self=
         self.dg.Value.SelectedItem <- null
         
     ///get the training history datagrid
-    // used to get reference to the datagrid
+    //used to get reference to the datagrid
     //needed because of MVVM
     member _.GetDg_cmd = self.Factory.CommandSyncParam <| fun (dg : System.Windows.Controls.DataGrid) ->
         self.dg  <- Some dg

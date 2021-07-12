@@ -70,12 +70,12 @@
       <Setter.Value>
         <ControlTemplate TargetType="Button">
           <Grid x:Name="griddy">
-            <Border x:Name="border" Margin="5,2,5,2" BorderBrush="Transparent" BorderThickness="5.5" CornerRadius="15" Effect="{StaticResource ButtonShadowDrop}" Background="{TemplateBinding Background}"/>
+            <Border x:Name="border" Margin="2,1,2,1"  BorderBrush="Transparent" BorderThickness="5.5" CornerRadius="15" Effect="{StaticResource ButtonShadowDrop}" Background="{TemplateBinding Background}"/>
             <ContentPresenter  HorizontalAlignment="Center"  VerticalAlignment="Center"/>
           </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="Button.IsPressed" Value="True">
-              <Setter TargetName="border"  Property="Margin" Value="0" />
+              <Setter TargetName="border"  Property="Margin" Value="6,2,6,2"/>
               <Setter TargetName="border"  Property="Background" Value="{StaticResource pressBrush}" />
             </Trigger>
             <Trigger Property="IsMouseOver" Value="True">
@@ -92,7 +92,7 @@
 
     </Setter>
   </Style>
-  <Style x:Key="RoundToggleButton" TargetType="ToggleButton">
+  <Style TargetType="ToggleButton">
     <Setter Property="HorizontalContentAlignment" Value="Center"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="FontSize" Value="15"/>

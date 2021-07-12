@@ -19,7 +19,7 @@ type CellState = Empty | Fruit | Snake
 [<Struct>]
 type Snake =  
     {
-        body : LinkedList<struct (int*int)> 
+        body : LinkedList<struct (int*int)>   // body needs to be ordered because of movement => head moves forward and tails gets removed
         direction : Directions
         score : int
         turnsWithoutSnack : int
