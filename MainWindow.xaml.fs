@@ -55,7 +55,6 @@ GUI is written in the framework WPF fully in MVVM => Bindings are used in order 
 INotifyPropertyChanged is automatically injected using library Fody to enable usage of bindings in the GUI.
 Rows in the training history Datagrid can be selected to let the best AI of the generation play. Can be done on-the-fly.
 
-
 --------------------------------------------------------------------------
 Development notes:
 
@@ -74,6 +73,7 @@ In later stages, when the snake gets large, the AI struggles as it doesn't have 
 The AI generally learns to use only one of right or left directions. 
 This could be solved by making so sort of special execises, one for each side, to force the AI to learn to use both directions. 
 However its probably too much work for too little gain.
+
 ---------------------------------------------------------------------------
 User documentation:
 
@@ -82,7 +82,7 @@ or you can train your very own AI to play it for you!
 
 The AI is trained in so-called population consisting of 100 individual AIs, 
 which compete against each other to achieve as high score as possible. 
-After competing, the best individuals are used to create the next generation. 
+After competing, the best individuals are selected to create the next generation. 
 So each generation is better than the last.
 
 Controls:
@@ -146,7 +146,7 @@ type GameViewModel() as self=
             | CellState.Fruit -> Settings.FruitBrush
         ui <| fun _ -> grid.[x, y].Fill <- col   // needs a dispatcher, because timer events run on a separate thread
 
-    let timer = new System.Timers.Timer(Interval = 50.0)
+    let timer = new System.Timers.Timer(Interval = 40.0)
     
     let game = GameManager(draw)
     
